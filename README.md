@@ -79,6 +79,23 @@ scripts/package_app.sh
 
 The generated app bundle is written to `dist/BioLab Explorer.app`.
 
+## Perpetual Discovery Worker (M1, offline)
+
+Consumes FASTA batches in `state/inbox/` and records every processed sequence into a
+local SQLite seen-set ledger (`discoveries/ledger.db`), flagging actionable ones and
+regenerating `discoveries/DISCOVERIES.md` from it. Offline only; local-only outputs.
+
+```sh
+swift build -c release
+cp your_batch.fasta state/inbox/
+scripts/run_discovery_cycle.sh
+scripts/discovery_status.sh
+```
+
+Guardrails: `state/STOP` stops gracefully; the cycle pauses under `diskFloorGB`/`maxWorkspaceBytes`
+(config/worker.json) and aborts if the reference digest ≠ `config/approved_manifest.json`.
+A single-instance lock (`state/.lock`) prevents overlap. Tests: `bash Tests/perpetual/run_all.sh`.
+
 ## Next Integration Points
 
 - Add FASTA import.

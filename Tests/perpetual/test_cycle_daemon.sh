@@ -59,4 +59,12 @@ if [[ -f "$S/logs/daemon.out.log" ]]; then
   [[ "$sz" -lt 10 ]] || { echo "FAIL: live daemon.out.log still oversized after rotation"; exit 1; }
 fi
 
+# 6) STOP kill-switch must survive a broken config: cfg() must not abort before the STOP gate
+S="$(sandbox)"; : > "$S/state/STOP"
+printf 'not-json' > "$S/worker.json"
+printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/b.fasta"
+set +e; run "$S" "$ok_pipe"; rc=$?; set -e
+[[ "$rc" -eq 0 ]] || { echo "FAIL: STOP + broken config did not exit 0 (rc=$rc)"; exit 1; }
+[[ -z "$(ls -A "$S/runs")" ]] || { echo "FAIL: STOP + broken config created a run dir"; exit 1; }
+
 echo "cycle daemon tests OK"

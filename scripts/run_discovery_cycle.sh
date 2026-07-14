@@ -31,7 +31,8 @@ cfg() { python3 -c "import json;print(json.load(open('${CONFIG}')).get('$1','$2'
 # ever truncates them. Keep one rotated copy and cap the live file so it can't grow unbounded.
 rotate_daemon_log() {  # $1 = log file; keep one .1, cap total to ~2x maxDaemonLogBytes
   local f="$1" max sz
-  max="$(cfg maxDaemonLogBytes 10485760)"
+  max="$(cfg maxDaemonLogBytes 10485760 2>/dev/null)" || max=10485760
+  [[ -n "$max" ]] || max=10485760
   [[ -f "$f" ]] || return 0
   sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ' || echo 0)"
   if [[ "${sz:-0}" -ge "$max" ]]; then mv -f "$f" "$f.1" 2>/dev/null || true; fi

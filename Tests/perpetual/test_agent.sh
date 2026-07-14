@@ -14,7 +14,7 @@ grep -q '<key>Label</key>' "$PLIST" || { echo "FAIL: no Label"; exit 1; }
 
 # resume clears PAUSED + failure streak
 S="$(mktemp -d)"; mkdir -p "$S/state"; : > "$S/state/PAUSED"; echo 3 > "$S/state/consecutive_failures"
-STATE_DIR="$S/state" bash "$AGENT" resume
+LABEL="com.biolab.test.$$" STATE_DIR="$S/state" bash "$AGENT" resume
 [[ ! -f "$S/state/PAUSED" ]] || { echo "FAIL: resume left PAUSED"; exit 1; }
 [[ ! -f "$S/state/consecutive_failures" ]] || { echo "FAIL: resume left failcount"; exit 1; }
 

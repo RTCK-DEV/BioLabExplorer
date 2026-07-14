@@ -4,7 +4,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${CONFIG:-${ROOT_DIR}/config/worker.json}"
 STATE_DIR="${STATE_DIR:-${ROOT_DIR}/state}"
 LOG_DIR="${LOG_DIR:-${ROOT_DIR}/logs}"
-LABEL="com.biolab.discovery"
+LABEL="${LABEL:-com.biolab.discovery}"
 PLIST_INSTALLED="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
 cfg() { python3 -c "import json;print(json.load(open('${CONFIG}')).get('$1','$2'))"; }

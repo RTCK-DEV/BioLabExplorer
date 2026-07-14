@@ -1,0 +1,31 @@
+# --- Build artifacts ---
+.build/
+dist/
+*.o
+*.swiftmodule
+*.swiftdoc
+
+# --- Tool / local caches ---
+.serena/
+.remember/
+.DS_Store
+
+# --- Large corpora (re-fetchable / regenerable) ---
+data/public_probe/
+
+# --- Perpetual-worker runtime state & generated outputs ---
+state/
+logs/*.log
+runs/cycle_*/
+discoveries/*.tmp
+discoveries/dashboard.html
+
+# --- Bundled tool binaries (re-downloadable, kept on disk) ---
+tools/**/*.tar.gz
+tools/foldseek/foldseek/
+
+# --- Python environments ---
+.venv/
+venv/
+__pycache__/
+*.pyc

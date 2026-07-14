@@ -7,4 +7,6 @@ bash "${DIR}/test_cycle_offline.sh"
 bash "${DIR}/test_status.sh"
 bash "${DIR}/test_cycle_daemon.sh"
 bash "${DIR}/test_agent.sh"
-echo "ALL M1+M2 TESTS PASSED"
+python3 "${DIR}/test_fetch_uniprot.py" -v
+bash "${DIR}/test_cycle_network.sh"
+echo "ALL M1+M2+M3 TESTS PASSED"

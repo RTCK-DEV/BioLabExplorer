@@ -112,6 +112,22 @@ scripts/discovery_agent.sh uninstall   # true stop (unload + remove)
 
 `state/STOP` pauses cycles without unloading; true stop is `uninstall`.
 
+## Perpetual Discovery Worker (M3, network rotation — opt-in)
+
+To keep finding NEW candidates, enable UniProt fetching (cursor-paged, one page/cycle):
+set `enableNetwork: true` in `config/worker.json`, ensure `config/approved_manifest.json`
+matches BOTH the curated reference AND `config/query_rotation.json` (digests), then run the
+daemon with the network switch ON:
+
+```sh
+ALLOW_NETWORK=1 scripts/run_discovery_cycle.sh    # one networked cycle (manual)
+```
+
+Envelope: never hits the network unless `ALLOW_NETWORK=1` AND the host is `uniprotHost`;
+rate-limited; fail-closed if the manifest is absent or the reference/query digests don't match.
+The approved query set lives in `config/query_rotation.json` — editing it requires re-approving
+the manifest digest (biosecurity scope control).
+
 ## Next Integration Points
 
 - Add FASTA import.

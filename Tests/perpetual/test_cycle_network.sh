@@ -41,4 +41,13 @@ set +e; run "$S"; rc=$?; set -e
 [[ "$rc" -ne 0 ]] || { echo "FAIL: network fetch without manifest should fail-closed"; exit 1; }
 [[ -z "$(ls -A "$S/state/inbox")" || ! -e "$S/state/inbox"/uniprot_* ]] 2>/dev/null || { echo "FAIL: fetched despite absent manifest"; exit 1; }
 
+# 4) enableNetwork=true + manifest present but querySetDigest MISMATCH -> fail-closed (no fetch, nonzero)
+S="$(sandbox true)";
+refd="$(python3 -c 'import hashlib,sys;print("sha256:"+hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$S/ref/ref.fasta")"
+# Deliberately wrong querySetDigest to simulate digest mismatch
+printf '{"referenceSha256":"%s","querySetDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","exclusions":["x"]}' "$refd" > "$S/cfg/approved_manifest.json"
+set +e; run "$S"; rc=$?; set -e
+[[ "$rc" -ne 0 ]] || { echo "FAIL: network fetch with querySetDigest mismatch should fail-closed"; exit 1; }
+[[ -z "$(ls -A "$S/state/inbox/processed" 2>/dev/null)" ]] || { echo "FAIL: processed fetch despite querySetDigest mismatch"; exit 1; }
+
 echo "cycle network tests OK"

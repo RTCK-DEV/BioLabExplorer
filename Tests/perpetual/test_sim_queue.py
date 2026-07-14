@@ -41,19 +41,48 @@ class DetectTests(unittest.TestCase):
 
 class ScheduleTests(unittest.TestCase):
     def test_ram_budget_admission(self):
-        det = {"vina": {"available": True}, "esmfold": {"available": True}}
-        # budget 4GiB; esmfold jobs estimated >1GiB each -> not all admitted
-        jobs = [{"backend": "esmfold", "seq_len": 300, "accession": f"A{i}"} for i in range(10)]
-        admitted, skipped = sq.schedule(jobs, CFG, det)
+        # ram_budget(cfg) = min(configured, sysctl hw.memsize - reserve), so with
+        # CFG's real 4 GiB budget this test would depend on the host's actual RAM.
+        # Worse, esmfold's floor (>=5 GiB, see estimate_ram) always exceeds a 4 GiB
+        # budget, so every job would be skipped and "admitted" would stay empty --
+        # both assertions below would pass vacuously. Patch ram_budget to a known
+        # value and use vina (flat 0.75 GiB/job) so PARTIAL admission actually
+        # happens and the boundary is exact: don't let a future edit "simplify"
+        # this back to relying on CFG/real RAM.
+        det = {"vina": {"available": True}}
+        jobs = [{"backend": "vina", "seq_len": 100, "accession": f"A{i}"} for i in range(10)]
+        orig = sq.ram_budget
+        sq.ram_budget = lambda cfg: 2 * sq.GIB        # vina est = 0.75 GiB -> exactly 2 fit
+        try:
+            admitted, skipped = sq.schedule(jobs, CFG, det)
+        finally:
+            sq.ram_budget = orig
+        self.assertEqual(len(admitted), 2)                            # partial admission actually happens
         total = sum(sq.estimate_ram(j["backend"], j["seq_len"], CFG) for j in admitted)
-        self.assertLessEqual(total, CFG["simRamBudgetBytes"])
-        self.assertTrue(skipped)  # some deferred by budget
+        self.assertLessEqual(total, 2 * sq.GIB)
+        self.assertTrue(all(s["reason_code"] == "ram_budget" for s in skipped))
 
     def test_gpu_serialised(self):
+        # With CFG's real 4 GiB budget, esmfold's >=5 GiB floor (see estimate_ram)
+        # means every job is skipped for ram_budget before the GPU-serialisation
+        # branch in schedule() is ever reached -- admitted stays empty and
+        # `0 <= MAX_GPU_CONCURRENT` passes vacuously without exercising the
+        # serialisation logic at all. Patch ram_budget so RAM is nowhere near the
+        # binding constraint, then assert the GPU cap is hit exactly (not just
+        # "under"), and that the overflow is skipped specifically for
+        # gpu_serialised (not some other reason): don't let a future edit
+        # "simplify" this back to relying on CFG/real RAM.
         det = {"esmfold": {"available": True}}
         jobs = [{"backend": "esmfold", "seq_len": 100, "accession": f"A{i}"} for i in range(5)]
-        admitted, _ = sq.schedule(jobs, CFG, det)
-        self.assertLessEqual(len([j for j in admitted if sq.is_gpu(j["backend"])]), sq.MAX_GPU_CONCURRENT)
+        orig = sq.ram_budget
+        sq.ram_budget = lambda cfg: 100 * sq.GIB      # RAM is not the constraint here
+        try:
+            admitted, skipped = sq.schedule(jobs, CFG, det)
+        finally:
+            sq.ram_budget = orig
+        gpu_admitted = [j for j in admitted if sq.is_gpu(j["backend"])]
+        self.assertEqual(len(gpu_admitted), sq.MAX_GPU_CONCURRENT)   # exactly the cap, not 0
+        self.assertTrue(any(s["reason_code"] == "gpu_serialised" for s in skipped))
 
     def test_length_gate_skips_long_sequences(self):
         det = {"esmfold": {"available": True}}

@@ -61,7 +61,20 @@ def _binary_ready():
 
 def _ensure_binary():
     """Return True if the real release binary is available, building it with
-    the local Swift toolchain (no network) if it isn't already present."""
+    the local Swift toolchain (no network) if it isn't already present.
+
+    Only OSError (the `swift` command itself doesn't exist -- toolchain
+    genuinely absent) and subprocess.TimeoutExpired (the build didn't finish
+    in time -- a build-environment issue, not necessarily a code regression)
+    are treated as "skip this test" conditions and raise unittest.SkipTest
+    here. subprocess.CalledProcessError -- `swift` exists, ran, and returned
+    nonzero, i.e. a genuine compile failure -- is intentionally left
+    uncaught so it propagates to the caller, which must report it as a loud
+    test FAILURE (with the captured compiler stdout/stderr) instead of
+    silently skipping. Collapsing all three into one skip would let a real
+    Swift compile regression slip through as a silent SKIP on a machine with
+    a working toolchain.
+    """
     if _binary_ready():
         return True
     try:
@@ -73,15 +86,35 @@ def _ensure_binary():
             text=True,
             timeout=1800,
         )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return False
+    except OSError as e:
+        raise unittest.SkipTest(
+            f"`swift` toolchain not found ({e}); skipping the "
+            "real-pipeline contract test"
+        )
+    except subprocess.TimeoutExpired as e:
+        raise unittest.SkipTest(
+            f"`swift build -c release` did not complete within "
+            f"{e.timeout}s; skipping the real-pipeline contract test "
+            "(build-environment issue, not confirmed as a code regression)"
+        )
     return _binary_ready()
 
 
 class RealPipelineAccessionContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not _ensure_binary():
+        try:
+            binary_ready = _ensure_binary()
+        except subprocess.CalledProcessError as e:
+            # swift exists and ran but the build genuinely failed: this must
+            # fail the test loudly, with the compiler output attached, not
+            # disappear as a skip.
+            raise AssertionError(
+                f"swift build -c release failed (exit {e.returncode}):\n"
+                f"--- stdout ---\n{e.stdout}\n"
+                f"--- stderr ---\n{e.stderr}"
+            ) from e
+        if not binary_ready:
             raise unittest.SkipTest(
                 "BioLabExplorerPipeline release binary is unavailable and "
                 "`swift build -c release` could not produce one in this "

@@ -201,6 +201,20 @@ if [[ ${#logs[@]} -gt ${MAX_LOG_FILES} ]]; then
   ls -1t "${LOG_DIR}"/cycle-*.log | tail -n +$((MAX_LOG_FILES + 1)) | while read -r f; do rm -f "$f"; done
 fi
 
+# optional simulation stack (opt-in; never fail the cycle over simulation)
+ENABLE_SIM="$(cfg enableSimulation false 2>/dev/null || echo false)"
+if [[ "${ENABLE_SIM}" == "True" || "${ENABLE_SIM}" == "true" ]]; then
+  CAND_JSON="${RUN_DIR}/sim_candidates.json"
+  if python3 "${ROOT_DIR}/scripts/discovery_db.py" export-new-actionable \
+       --db "${LEDGER_DB}" --cycle "${CYCLE}" --out "${CAND_JSON}" >/dev/null 2>&1; then
+    python3 "${ROOT_DIR}/scripts/sim_queue.py" run --candidates "${CAND_JSON}" \
+      --run-dir "${RUN_DIR}" --config "${CONFIG}" >/dev/null 2>&1 \
+      || log "simulation queue skipped (non-fatal)"
+  else
+    log "simulation candidate export skipped (non-fatal)"
+  fi
+fi
+
 # regenerate the self-contained dashboard (never fail the cycle over visualization)
 ALPHAFOLD_CACHE="${ALPHAFOLD_CACHE:-${ROOT_DIR}/data/alphafold_cache}"
 python3 "${ROOT_DIR}/scripts/generate_dashboard.py" \

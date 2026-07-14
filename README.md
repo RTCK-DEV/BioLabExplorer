@@ -174,9 +174,13 @@ ALLOW_NETWORK=1 scripts/setup_simulation_stack.sh   # multi-GB install (your cal
 ```
 
 Available today without any install: mmseqs2, HMMER, bundled Foldseek.
-ColabFold is NOT part of the stack (needs ~940GB DB / ~128GB RAM locally). Optionally
-mount an **External MSA Store** with precomputed a3m and set `externalMsaStorePath` +
-`enableColabFold` — folding then uses those MSAs only; the public MSA server is never contacted.
+ColabFold is NOT part of the stack (needs ~940GB DB / ~128GB RAM locally). The
+**External MSA Store** (`externalMsaStorePath` + `enableColabFold` in `config/worker.json`)
+is **not yet implemented** — these config keys are currently inert (present as
+placeholders and accepted by config validation, but no code path reads or acts on them
+yet; see the design spec's M5 optional-extension note). The intended design, once built,
+is: mount a store of precomputed a3m and set both keys — folding would then use those
+MSAs only, and the public MSA server would never be contacted.
 
 ## Next Integration Points
 

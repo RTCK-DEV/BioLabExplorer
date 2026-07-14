@@ -67,4 +67,14 @@ set +e; run "$S"; rc=$?; set -e
 [[ -f "$S/state/inbox/batch8.fasta" ]] || { echo "FAIL: manifest mismatch consumed batch"; exit 1; }
 [[ -z "$(ls -A "$S/state/inbox/processed")" ]] || { echo "FAIL: manifest mismatch batch reached processed"; exit 1; }
 
+# df failure must NOT abort the cycle nor falsely trip the disk-floor pause
+S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/dffail.fasta"
+mkdir -p "$S/fakebin"; printf '#!/bin/sh\nexit 1\n' > "$S/fakebin/df"; chmod +x "$S/fakebin/df"
+STATE_DIR="$S/state" RUNS_DIR="$S/runs" DISCOVERIES_DIR="$S/discoveries" \
+  REFERENCE="$S/ref/ref.fasta" LOG_DIR="$S/logs" NOTIFY_CMD="true" \
+  CONFIG="$S/worker.json" PIPELINE_CMD="bash ${ROOT}/Tests/perpetual/fake_pipeline.sh" \
+  PATH="$S/fakebin:$PATH" bash "$CYCLE"
+[[ "$(count_actionable "$S")" == "1" ]] || { echo "FAIL: df failure aborted/false-paused the cycle"; exit 1; }
+ls "$S/state/inbox/processed/"*dffail.fasta >/dev/null 2>&1 || { echo "FAIL: df failure prevented batch consumption"; exit 1; }
+
 echo "cycle offline tests OK"

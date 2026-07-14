@@ -31,14 +31,14 @@ if [[ -f "${STATE_DIR}/STOP" ]]; then log "STOP present -> graceful stop"; exit 
 if [[ ! -s "${REFERENCE}" ]]; then log "missing reference: ${REFERENCE}"; exit 2; fi
 
 DISK_FLOOR_GB="$(cfg diskFloorGB 10)"
-FREE_GB="$(df -g "${ROOT_DIR}" | awk 'NR==2 {print $4}')"
+FREE_GB="$(df -g "${ROOT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
 if [[ -n "${FREE_GB}" && "${FREE_GB}" -lt "${DISK_FLOOR_GB}" ]]; then
   log "disk free ${FREE_GB}GB < floor ${DISK_FLOOR_GB}GB -> pause"; exit 0
 fi
 
 MAX_WS_BYTES="$(cfg maxWorkspaceBytes 21474836480)"
 if [[ -d "${RUNS_DIR}" ]]; then
-  USED_KB="$(du -sk "${RUNS_DIR}" 2>/dev/null | awk '{print $1}')"
+  USED_KB="$(du -sk "${RUNS_DIR}" 2>/dev/null | awk '{print $1}' || true)"
   if [[ -n "${USED_KB:-}" && $(( USED_KB * 1024 )) -ge "${MAX_WS_BYTES}" ]]; then
     log "workspace ${USED_KB}KB >= quota -> pause (prune runs/ manually)"; exit 0
   fi

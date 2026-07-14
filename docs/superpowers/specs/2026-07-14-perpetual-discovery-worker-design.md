@@ -20,7 +20,7 @@
 | 常駐 | launchd `KeepAlive`（終了→即再起動）でサイクルを連続実行。重なり無し |
 | ペース | 6h は「1サイクルのソフト予算」。早く終われば即次へ、長引けば新規ジョブを止めて終了→次へ |
 | 上限 | サイクル数に上限なし。ただし**容量 quota**(`maxWorkspaceBytes`/`maxLogFiles`)＋ディスク空き下限で保護停止。worker所有の temp/log のみ自動剪定(`runs/`等は削除しない＝AGENTS.md準拠)。連続失敗で**サーキットブレーカ**(PAUSED) |
-| 計算 | ESMFold(MPS・長さ依存) + OpenMM(MD・スレッド制限) + AutoDock Vina + Foldseek(バンドル) + mmseqs2 + HMMER。**ColabFold は除外**(24GBローカル不可・生FASTAは公開MSAサーバ問い合わせ=host許可制違反)。RAM予算スケジューラ(予約8–10GB・memory_pressure監視・per-tool timeout)＋グレースフル縮退 |
+| 計算 | ESMFold(MPS・長さ依存) + OpenMM(MD・スレッド制限) + AutoDock Vina + Foldseek(バンドル) + mmseqs2 + HMMER。**ColabFold は既定OFF**(24GBローカル不可・生FASTAは公開MSAサーバ問い合わせ=host許可制違反。**オプションで外部MSAストア＋precomputed a3m 接続時のみ opt-in 可**)。RAM予算スケジューラ(予約8–10GB・memory_pressure監視・per-tool timeout)＋グレースフル縮退 |
 | 可視化 | 自己更新 HTML ダッシュボード＋**インタラクティブ3Dタンパク質ビューア**（3Dmol.js 同梱・**pLDDT信頼度で色分け**）。時系列/スコア分布/稼働状況も表示 |
 
 ## 3. 制約・非目標（AGENTS.md 準拠）
@@ -129,7 +129,10 @@ logs/
   | ESMFold(torch-MPS) | 全新規候補の高速folding | 長さ依存(重み~5GB+・trunk O(L²)) | 2–3(GPU直列) |
   | OpenMM(CPU) | 予測構造のMD緩和/短時間シミュ | ~1–2GB | 2–4(スレッド上限明示) |
   | Foldseek(バンドル) | 予測構造の構造検索 | ~1GB | 多数 |
-- **ColabFold は除外**（ユーザー決定）: 生FASTAは公開MSAサーバへ問い合わせ(host許可制違反)、完全ローカルMSAは約940GB DB＋約128GB RAM で 24GB では不可。将来、事前計算した承認済み MSA がある場合のみ opt-in 検討。
+- **ColabFold は既定 OFF**: 生FASTAは公開MSAサーバへ問い合わせ(host許可制違反)、完全ローカルMSAは約940GB DB＋約128GB RAM で 24GB では搭載不可。よって既定では使わない。
+- **オプション: External MSA Store（opt-in・ローカル完結）**: 外部ストレージ（マウント済みボリューム `externalMsaStorePath`）に **事前計算済み MSA（a3m）** を置いた場合に限り、`enableColabFold: true` で ColabFold を有効化可能。
+  - **適用範囲の線引き**: この経路は **外部の precomputed MSA を読み込んで folding するのみ**。940GB DB を外部に置いても、ローカルでの MSA 検索は依然 ~128GB RAM を要し 24GB では不可なので、**MSA 検索は行わず precomputed a3m を使う**運用に限定する。
+  - **envelope 維持**: 公開 MSA サーバには**絶対に問い合わせない**（`--msa-mode` は precomputed/local のみ）。外部ストアの MSA も承認 manifest のスコープ・provenance に従う。ストア未マウント時は自動で **ESMFold にフォールバック**（missing=可視化）。RAM 予算・長さゲートは folding にも適用。M5 の後段オプションとして実装（M1〜M4 には無関係）。
 - **スケジューラ**: RAM予算 = `min(config, 総RAM - reserve(既定8–10GB))`。**配列長・MSA深度を考慮した入場クラス**で `Σ 見積RAM ≤ 予算` を満たす範囲で投入。MPS系はGPU直列化。`memory_pressure`/`vm_stat` 監視で逼迫時は新規投入停止。**per-tool timeout＋TERM→grace→KILL**、投入締切は shutdown 時間を確保。長い配列は folding 前に max-length ゲート。
 - **縮退**: 未導入/失敗バックエンドはスキップし、最終的に Swift-native の軽量検証へフォールバック。1件も倒れない。
 - **時間予算**: `--budget-seconds` 到達で新規投入を停止、実行中は完了まで待って終了（重なり回避）。
@@ -181,12 +184,12 @@ logs/
 2. **M2 常駐化**: launchd（**条件付き KeepAlive**）＋installer。連続実行・重なり回避・時間予算・**サーキットブレーカ(PAUSED)**・真の停止=unload。空回転回避のため最小入力源を同梱。
 3. **M3 ネット回転(opt-in)**: UniProt fetcher＋envelope。範囲JSON承認フロー。
 4. **M4 可視化**: dashboard generator ＋ **インタラクティブ3Dタンパク質ビューア(3Dmol.js同梱・pLDDT色分け)**。M4 時点は AlphaFold キャッシュ／「未予測」フォールバックで成立し、M5 の folding 出力で素材が充実する。
-5. **M5 計算スタック**: `setup_simulation_stack.sh`＋`sim_queue.py`（RAM予算・長さ依存入場・縮退・per-tool timeout）。ESMFold→OpenMM→Vina→Foldseek（**ColabFold は除外**）。テスト5。
+5. **M5 計算スタック**: `setup_simulation_stack.sh`＋`sim_queue.py`（RAM予算・長さ依存入場・縮退・per-tool timeout）。ESMFold→OpenMM→Vina→Foldseek（**ColabFold は既定OFF**）。加えて後段オプションとして **External MSA Store**（外部ストレージの precomputed a3m を接続時のみ ColabFold を opt-in 有効化）。テスト5。
 
 各マイルストーンは独立に価値があり、M1時点で「新規のみ蓄積する半永久ワーカー」として成立する。
 
 ## 9. 前提・未決
 - `setup_simulation_stack.sh` の実行（多GB DL・ネット）は**ユーザー承認のもとで実施**。Claude は無断でインストール/ネットアクセスしない。
-- **ColabFold はスタックから除外**（24GB ローカル不可・host許可制違反）。将来、事前計算した承認済み MSA がある場合のみ opt-in を再検討。
+- **ColabFold は既定 OFF**。オプションの **External MSA Store**（外部ストレージ `externalMsaStorePath` の precomputed a3m）を接続した時のみ `enableColabFold: true` で opt-in 有効化可。ローカルでの MSA 検索(~128GB RAM)は 24GB では不可なので **precomputed MSA 前提**。公開 MSA サーバには問い合わせない。未マウント時は ESMFold にフォールバック。
 - ESMFold の RAM は配列長依存。長い配列は max-length ゲート/チャンク化で OOM 回避（実測ベースで入場制御）。
 - 3Dmol.js の同梱方法（ベンダリング）は M4 で確定。pLDDT は PDB の B-factor 列（AlphaFold/ESMFold 慣習）を既定の色分けソースとする。

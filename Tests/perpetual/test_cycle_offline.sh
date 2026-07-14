@@ -49,4 +49,22 @@ S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/dup.fasta"; r
 printf '>OTHER\nMMMM\n' > "$S/state/inbox/dup.fasta"; run "$S"
 [[ "$(ls "$S/state/inbox/processed/" | grep -c dup.fasta)" == "2" ]] || { echo "FAIL: processed overwrite"; exit 1; }
 
+# 7) manifest digest MATCH -> cycle proceeds
+S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/batch7.fasta"
+DIGEST="$(python3 -c 'import hashlib,sys;print("sha256:"+hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$S/ref/ref.fasta")"
+printf '{"referenceSha256":"%s","querySetId":"offline-inbox","exclusions":["virulence factors","select-agent homologs"]}' "$DIGEST" > "$S/approved_manifest.json"
+run "$S"
+[[ "$(count_actionable "$S")" == "1" ]] || { echo "FAIL: manifest match did not proceed"; exit 1; }
+ls "$S/state/inbox/processed/"*batch7.fasta >/dev/null 2>&1 || { echo "FAIL: manifest match batch not moved to processed"; exit 1; }
+
+# 8) manifest digest MISMATCH -> fail closed
+S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/batch8.fasta"
+WRONG="sha256:$(python3 -c "print('0'*64)")"
+printf '{"referenceSha256":"%s","querySetId":"offline-inbox","exclusions":["virulence factors"]}' "$WRONG" > "$S/approved_manifest.json"
+set +e; run "$S"; rc=$?; set -e
+[[ "$rc" == "3" ]] || { echo "FAIL: manifest mismatch rc != 3 (got $rc)"; exit 1; }
+[[ -z "$(ls -A "$S/runs")" ]] || { echo "FAIL: manifest mismatch made a run"; exit 1; }
+[[ -f "$S/state/inbox/batch8.fasta" ]] || { echo "FAIL: manifest mismatch consumed batch"; exit 1; }
+[[ -z "$(ls -A "$S/state/inbox/processed")" ]] || { echo "FAIL: manifest mismatch batch reached processed"; exit 1; }
+
 echo "cycle offline tests OK"

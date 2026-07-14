@@ -14,7 +14,18 @@ dist/
 data/public_probe/
 
 # --- Perpetual-worker runtime state & generated outputs ---
-state/
+# --- Perpetual worker runtime (local only) ---
+state/*
+!state/inbox/
+state/inbox/*
+!state/inbox/.gitkeep
+!state/inbox/processed/
+state/inbox/processed/*
+!state/inbox/processed/.gitkeep
+discoveries/ledger.db
+discoveries/ledger.db-wal
+discoveries/ledger.db-shm
+discoveries/DISCOVERIES.md
 logs/*.log
 runs/cycle_*/
 discoveries/*.tmp

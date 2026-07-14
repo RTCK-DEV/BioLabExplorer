@@ -19,8 +19,8 @@
 | 入力 | UniProt 回転取得。`--allow-network` opt-in・host許可制・レート制限・承認済みクエリ範囲のみ |
 | 常駐 | launchd `KeepAlive`（終了→即再起動）でサイクルを連続実行。重なり無し |
 | ペース | 6h は「1サイクルのソフト予算」。早く終われば即次へ、長引けば新規ジョブを止めて終了→次へ |
-| 上限 | サイクル数・出力に上限を設けない。ただしディスク空き**下限**で保護停止 |
-| 計算 | フルスタック: ESMFold(MPS) + OpenMM(MD) + AutoDock Vina + ColabFold + Foldseek(バンドル) + mmseqs2 + HMMER。RAM予算スケジューラ＋グレースフル縮退 |
+| 上限 | サイクル数に上限なし。ただし**容量 quota**(`maxWorkspaceBytes`/`maxLogFiles`)＋ディスク空き下限で保護停止。worker所有の temp/log のみ自動剪定(`runs/`等は削除しない＝AGENTS.md準拠)。連続失敗で**サーキットブレーカ**(PAUSED) |
+| 計算 | ESMFold(MPS・長さ依存) + OpenMM(MD・スレッド制限) + AutoDock Vina + Foldseek(バンドル) + mmseqs2 + HMMER。**ColabFold は除外**(24GBローカル不可・生FASTAは公開MSAサーバ問い合わせ=host許可制違反)。RAM予算スケジューラ(予約8–10GB・memory_pressure監視・per-tool timeout)＋グレースフル縮退 |
 | 可視化 | 自己更新 HTML ダッシュボード＋**インタラクティブ3Dタンパク質ビューア**（3Dmol.js 同梱・**pLDDT信頼度で色分け**）。時系列/スコア分布/稼働状況も表示 |
 
 ## 3. 制約・非目標（AGENTS.md 準拠）
@@ -35,8 +35,15 @@
 ### 責任ある利用（Responsible Use）
 本ワーカーは公開 UniProt の未特性化配列を、キュレート済み参照(PBP/PKS 等)に対して
 **トリアージ（新規性ランキング＋構造的興味の一次評価）**する研究用途に限定する。
-病原性の設計・強化は目的でも機能でもない。探索スコープの変更、参照セットの差し替え、
-外部送信の追加は、いずれも人間の明示レビューを必須とする。
+病原性の設計・強化は目的でも機能でもない。これは公開データの正当な研究トリアージであり、
+配列設計・合成・強化のいずれも行わない（全レビュー一致の結論）。
+
+**スコープの明文境界（enforced）**:
+- 承認済みの参照集合と `query_rotation.json` は、**毒素・病原性因子・toxin biosynthesis gene cluster・select-agent 相同体を除外**する。除外規定は `config/approved_manifest.json` に明記。
+- 参照/クエリ集合は **digest で fail-closed**（一致しなければ実行中止）。来歴（reviewer/date/digest）を記録し、スコープ変更時のレビューで除外の充足を明示的に attest する。
+- `DISCOVERIES.md`・ダッシュボードに intended-use ヘッダ（「未検証の in-silico 予測・外部利用/公開/wet-lab 引渡しは要レビュー」）を付す。
+- 生成物は git 追跡外（ローカルのみ）。標的/リガンドの拡張、病原性志向のスコープ、外部送信・公開、生成的配列設計、wet-lab 引渡しは**新規レビュー必須**。
+探索スコープの変更、参照セットの差し替え、外部送信の追加は、いずれも人間の明示レビューを必須とする。
 
 ## 4. アーキテクチャ
 
@@ -90,20 +97,24 @@ logs/
 - **依存**: 既存探索実行体、`sim_queue.py`、`config/*.json`、`state/*`。
 
 ### 5.2 Rotation State — `state/rotation.json` ＋ `config/query_rotation.json`
-- **責務**: 「次に何を取りに行くか」を持ち、毎サイクル前進させて入力を変え続ける。
-- **契約(rotation.json)**: `{ "queryIndex": int, "offset": int, "updatedCycle": int }`
-- **契約(query_rotation.json)**: `{ "queries": [{ "id": str, "uniprotQuery": str, "pageSize": 200, "maxOffset": int }], "policy": "advance-offset-then-next-query" }`
-- **依存**: なし（純データ）。カーソルと台帳を**別ファイル**に分離（クラッシュ耐性）。
+- **責務**: 「次に何を取りに行くか」を持ち、毎サイクル前進させて入力を変え続ける。すべて `schemaVersion` 付き。
+- **契約(rotation.json)**: `{ "schemaVersion": 1, "queryId": str, "approvedQueryDigest": str, "nextCursor": str|null, "cycle": int, "updatedCycle": int, "lastRunId": str }`。M1 はオフラインの縮退形 `{ "schemaVersion", "cycle", "updatedCycle", "lastRunId" }` を使い、`queryId/nextCursor` は M3 で追加。
+- **UniProt ページング**: **不透明カーソル(`Link: rel=next`)** を state に保存して辿る。数値 offset は生 DB のエントリ移動で取りこぼし/重複が起きるため使わない。
+- **契約(query_rotation.json)**: `{ "schemaVersion": 1, "queries": [{ "id": str, "uniprotQuery": str, "pageSize": 200 }] }`（承認済みクエリ集合。digest を rotation に記録）。
+- **依存**: なし（純データ）。カーソルと台帳を**別ファイル**に分離（クラッシュ耐性）。書込は temp+`os.replace` の原子的更新。
 
 ### 5.3 Network Fetcher（opt-in）
 - **責務**: `--allow-network` 時のみ、rotation が指す UniProt REST クエリで新バッチを取得。
 - **envelope**: host許可リスト固定、`User-Agent` 明示、リクエスト間 sleep（≥1s）、1サイクル上限200配列、タイムアウト、リトライ指数バックオフ。**読み取り専用**。
 - **失敗時**: ネット不通/範囲尽きは soft-fail（ログ＋no-op終了、カーソルは進めない）。
 
-### 5.4 Dedup Ledger — `discoveries/ledger.jsonl`
-- **責務**: 既発見の単一真実源。冪等（同一配列の再報告を絶対にしない）。
-- **契約(1行)**: `{ "seqSha256": str, "accession": str, "firstSeenCycle": int, "score": float, "verdict": str, "ts": str }`
-- **dedupキー**: `seqSha256` OR `accession`。近傍重複クラスタリング（k-mer類似）は将来拡張。
+### 5.4 Seen-set Ledger — `discoveries/ledger.db`（**SQLite・stdlib**）
+- **責務**: 処理済み配列の単一真実源（seen-set）。**処理した全配列**を記録し、該当を `verdict='actionable'` に。冪等・クラッシュ整合を PRIMARY KEY＋単一トランザクションで担保。
+- **identity**: `seq_sha256`（配列の大文字正規化 sha256）を PRIMARY KEY＝dedup キー。`accession` は provenance（同一 accession の配列改訂は別 identity として記録）。
+- **スキーマ**: `processed(seq_sha256 PK, accession, verdict CHECK(actionable|screened), score, classification, first_seen_cycle, run_id, ts, schema_version)`。
+- **書込**: `INSERT OR IGNORE` を1トランザクションで実行→バッチ内重複も自動排除。新規 actionable 件数は `rowcount==1 && actionable` で厳密カウント（全件スキャン不要）。
+- **`DISCOVERIES.md`**: 台帳から毎サイクル**再生成**（temp+`os.replace`）。二重書き込みによるクラッシュ不整合を排除。`ledger.db`・`DISCOVERIES.md` とも **git 追跡外（ローカルのみ）**。
+- **actionable 定義**: `DiscoveryValidator.qualifyingCandidateIDs` を再利用（独自閾値を作らない）。
 
 ### 5.5 Discovery/Search Stage（既存再利用）
 - **責務**: 取得バッチを curated reference に対し Swift-native で探索・スコア。
@@ -115,11 +126,11 @@ logs/
   | ツール | 役割 | 概算RAM/ジョブ | 既定同時数 |
   |---|---|---|---|
   | AutoDock Vina | ドッキング一次スクリーニング | ~0.5–1GB | 多数(コア律速) |
-  | ESMFold(torch-MPS) | 全新規候補の高速folding | ~2–4GB | 2–3 |
-  | OpenMM(CPU) | 予測構造のMD緩和/短時間シミュ | ~1–2GB | 2–4 |
+  | ESMFold(torch-MPS) | 全新規候補の高速folding | 長さ依存(重み~5GB+・trunk O(L²)) | 2–3(GPU直列) |
+  | OpenMM(CPU) | 予測構造のMD緩和/短時間シミュ | ~1–2GB | 2–4(スレッド上限明示) |
   | Foldseek(バンドル) | 予測構造の構造検索 | ~1GB | 多数 |
-  | ColabFold | **上位候補のみ**深掘りfolding | ~6–12GB | 1 |
-- **スケジューラ**: RAM予算 = `min(config, 総RAM - reserve(既定6GB))`。`Σ 見積RAM ≤ 予算` を満たす範囲で投入、空けば次を投入。MPS系はGPU直列化を尊重。
+- **ColabFold は除外**（ユーザー決定）: 生FASTAは公開MSAサーバへ問い合わせ(host許可制違反)、完全ローカルMSAは約940GB DB＋約128GB RAM で 24GB では不可。将来、事前計算した承認済み MSA がある場合のみ opt-in 検討。
+- **スケジューラ**: RAM予算 = `min(config, 総RAM - reserve(既定8–10GB))`。**配列長・MSA深度を考慮した入場クラス**で `Σ 見積RAM ≤ 予算` を満たす範囲で投入。MPS系はGPU直列化。`memory_pressure`/`vm_stat` 監視で逼迫時は新規投入停止。**per-tool timeout＋TERM→grace→KILL**、投入締切は shutdown 時間を確保。長い配列は folding 前に max-length ゲート。
 - **縮退**: 未導入/失敗バックエンドはスキップし、最終的に Swift-native の軽量検証へフォールバック。1件も倒れない。
 - **時間予算**: `--budget-seconds` 到達で新規投入を停止、実行中は完了まで待って終了（重なり回避）。
 - **IF**: `sim_queue.py --candidates <json> --budget-seconds N --ram-budget-gb G` → 結果JSONを返す。
@@ -143,9 +154,13 @@ logs/
 - **責務**: `com.biolab.discovery.plist`（`KeepAlive=true`、`ThrottleInterval` で最小間隔、`RunAtLoad`、stdout/err→`logs/`）。`install_discovery_agent.sh` で load/unload/status。
 
 ### 5.10 Guardrails / Status / Kill-switch
-- `state/STOP` 存在→次サイクルで安全停止。
-- ディスク空き下限（既定10GB）割れ→保護停止＋通知（出力上限ではない）。
-- `discovery_status.sh`：サイクル数・最終実行・新規累計・カーソル・次クエリ・ネット可否・ツール可用・ディスク・実行中ジョブ。
+- **単一実行ロック**: `state/.lock`（原子的 mkdir・stale は pid 生存で回収）。M1 から導入し多重起動を防止。
+- `state/STOP` 存在→次サイクルで安全停止。真の停止は launchd unload（M2）。
+- **容量 quota**: `maxWorkspaceBytes`/`maxLogFiles` 超過＋ディスク空き下限割れ→保護停止＋通知。重ジョブ投入前にも空き再確認（M5）。
+- **retention**: worker 所有の temp/log のみ明示許可で自動剪定。`runs/` 成果物は削除しない（AGENTS.md 準拠）。no-op サイクルは run dir を作らない。
+- **サーキットブレーカ**: 連続失敗 N 回で PAUSED、明示復帰まで再開しない（M2）。
+- **バイオセキュリティ fail-closed**: 参照/クエリ集合が `config/approved_manifest.json` の digest と不一致なら中止（M1 から参照 digest を検証）。
+- `discovery_status.sh`：サイクル数・最終実行・新規累計・ネット可否・ディスク・STOP・（M2以降）ロック/PAUSED 状態。
 
 ## 6. 安全 envelope（再掲・要点）
 - ネット既定OFF / opt-in時も host許可制・レート制限・読取専用・範囲は承認済みJSONのみ。
@@ -162,15 +177,16 @@ logs/
 5. RAM予算スケジューラ（見積合計が予算を超えない／縮退でフォールバック）。
 
 ## 8. ビルド順（マイルストーン）
-1. **M1 骨格（オフライン）**: cycle runner＋rotation＋ledger＋recorder＋status。`state/inbox` 消費で新規のみ蓄積。テスト1–4。
-2. **M2 常駐化**: launchd plist＋installer。KeepAlive連続実行・重なり回避・時間予算。
+1. **M1 骨格（オフライン・トランザクショナル）**: cycle runner＋atomic rotation＋**SQLite seen-set 台帳**＋recorder(MD再生成)＋status＋**ロック/quota/manifest**。`state/inbox` 消費で全処理配列を記録・actionable を蓄積。
+2. **M2 常駐化**: launchd（**条件付き KeepAlive**）＋installer。連続実行・重なり回避・時間予算・**サーキットブレーカ(PAUSED)**・真の停止=unload。空回転回避のため最小入力源を同梱。
 3. **M3 ネット回転(opt-in)**: UniProt fetcher＋envelope。範囲JSON承認フロー。
 4. **M4 可視化**: dashboard generator ＋ **インタラクティブ3Dタンパク質ビューア(3Dmol.js同梱・pLDDT色分け)**。M4 時点は AlphaFold キャッシュ／「未予測」フォールバックで成立し、M5 の folding 出力で素材が充実する。
-5. **M5 フルスタック計算**: `setup_simulation_stack.sh`＋`sim_queue.py`（RAM予算・縮退）。ESMFold→OpenMM→Vina→ColabFold(上位のみ)→Foldseek。テスト5。
+5. **M5 計算スタック**: `setup_simulation_stack.sh`＋`sim_queue.py`（RAM予算・長さ依存入場・縮退・per-tool timeout）。ESMFold→OpenMM→Vina→Foldseek（**ColabFold は除外**）。テスト5。
 
 各マイルストーンは独立に価値があり、M1時点で「新規のみ蓄積する半永久ワーカー」として成立する。
 
 ## 9. 前提・未決
 - `setup_simulation_stack.sh` の実行（多GB DL・ネット）は**ユーザー承認のもとで実施**。Claude は無断でインストール/ネットアクセスしない。
-- ColabFold は 24GB では MSA が重いため既定は reduced-MSA/上位候補限定。必要なら後で調整。
-- 3Dmol.js の同梱方法（ベンダリング）は M4 で確定。pLDDT は PDB の B-factor 列（AlphaFold/ESMFold 慣習）を既定の色分けソースとし、ColabFold は scores JSON を併用。
+- **ColabFold はスタックから除外**（24GB ローカル不可・host許可制違反）。将来、事前計算した承認済み MSA がある場合のみ opt-in を再検討。
+- ESMFold の RAM は配列長依存。長い配列は max-length ゲート/チャンク化で OOM 回避（実測ベースで入場制御）。
+- 3Dmol.js の同梱方法（ベンダリング）は M4 で確定。pLDDT は PDB の B-factor 列（AlphaFold/ESMFold 慣習）を既定の色分けソースとする。

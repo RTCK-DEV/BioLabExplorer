@@ -54,6 +54,7 @@ case "${1:-}" in
     bash "${ROOT_DIR}/scripts/discovery_status.sh" ;;
   resume)
     rm -f "${STATE_DIR}/PAUSED" "${STATE_DIR}/consecutive_failures"
+    launchctl kickstart -k "gui/$(id -u)/${LABEL}" 2>/dev/null || true
     echo "resumed (cleared PAUSED + failure streak)" ;;
   *) echo "usage: $0 {generate <out.plist>|install|uninstall|status|resume}" >&2; exit 2 ;;
 esac

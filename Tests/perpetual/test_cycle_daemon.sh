@@ -7,7 +7,7 @@ sandbox() {
   local d; d="$(mktemp -d)"
   mkdir -p "$d/state/inbox/processed" "$d/runs" "$d/discoveries" "$d/ref" "$d/logs"
   printf '>ref\nMKTAYIAKQR\n' > "$d/ref/ref.fasta"
-  printf '{"diskFloorGB":0,"maxCandidates":20,"maxWorkspaceBytes":1073741824000,"maxLogFiles":200,"budgetSeconds":60,"maxConsecutiveFailures":2,"throttleSeconds":300}' > "$d/worker.json"
+  printf '{"diskFloorGB":0,"maxCandidates":20,"maxWorkspaceBytes":1073741824000,"maxLogFiles":200,"maxDaemonLogBytes":10485760,"budgetSeconds":60,"maxConsecutiveFailures":2,"throttleSeconds":300}' > "$d/worker.json"
   echo "$d"
 }
 ok_pipe="bash ${ROOT}/Tests/perpetual/fake_pipeline.sh"
@@ -46,5 +46,17 @@ printf '>x\nMKT\n' > "$S/state/inbox/f1.fasta"; set +e; run "$S" "$fail_pipe"; s
 [[ "$(cat "$S/state/consecutive_failures")" == "1" ]] || { echo "FAIL: pre-reset failcount"; exit 1; }
 printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/ok.fasta"; run "$S" "$ok_pipe"
 [[ ! -f "$S/state/consecutive_failures" ]] || { echo "FAIL: success did not reset streak"; exit 1; }
+
+# 5) daemon log rotation: oversized launchd-appended daemon.out.log gets rotated on every cycle
+S="$(sandbox)"
+printf '{"diskFloorGB":0,"maxCandidates":20,"maxWorkspaceBytes":1073741824000,"maxLogFiles":200,"maxDaemonLogBytes":10,"budgetSeconds":60,"maxConsecutiveFailures":2,"throttleSeconds":300}' > "$S/worker.json"
+printf 'x%.0s' {1..64} > "$S/logs/daemon.out.log"
+printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/b.fasta"
+run "$S" "$ok_pipe"
+[[ -f "$S/logs/daemon.out.log.1" ]] || { echo "FAIL: oversized daemon.out.log was not rotated to .1"; exit 1; }
+if [[ -f "$S/logs/daemon.out.log" ]]; then
+  sz="$(wc -c < "$S/logs/daemon.out.log" | tr -d ' ')"
+  [[ "$sz" -lt 10 ]] || { echo "FAIL: live daemon.out.log still oversized after rotation"; exit 1; }
+fi
 
 echo "cycle daemon tests OK"

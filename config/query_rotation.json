@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "queries": [
+    {
+      "id": "bacteria-uncharacterized",
+      "uniprotQuery": "(reviewed:false) AND (protein_name:\"Uncharacterized protein\") AND (taxonomy_id:2)"
+    }
+  ]
+}

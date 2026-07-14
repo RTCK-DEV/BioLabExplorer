@@ -1,11 +1,12 @@
 {
   "referenceSha256": "sha256:2497b5338b5e3aafc15263e0aaee9ca425ffa7be501986dabcf009d8b3540bfc",
-  "querySetId": "offline-inbox",
+  "querySetId": "bacteria-uncharacterized",
   "reviewer": "unset",
   "reviewedDate": "2026-07-14",
   "exclusions": [
     "virulence factors",
     "toxin biosynthesis gene clusters",
     "select-agent homologs"
-  ]
+  ],
+  "querySetDigest": "sha256:6ef41f8d2d2dd8f258985476f599f2be8435876f78163f54b04fcff6b7c00b10"
 }

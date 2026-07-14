@@ -6,5 +6,9 @@
   "maxDaemonLogBytes": 10485760,
   "budgetSeconds": 21600,
   "maxConsecutiveFailures": 5,
-  "throttleSeconds": 300
+  "throttleSeconds": 300,
+  "enableNetwork": false,
+  "fetchPageSize": 200,
+  "fetchRateLimitSeconds": 1,
+  "uniprotHost": "rest.uniprot.org"
 }

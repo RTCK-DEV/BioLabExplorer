@@ -59,9 +59,32 @@ if [[ -d "${RUNS_DIR}" ]]; then
   fi
 fi
 
+MANIFEST="$(dirname "${CONFIG}")/approved_manifest.json"
+
 # batch present? (nullglob array; no error-hiding find|head)
 shopt -s nullglob; batches=("${INBOX}"/*.fasta); shopt -u nullglob
-if [[ ${#batches[@]} -eq 0 ]]; then log "inbox empty -> no-op"; exit 0; fi
+if [[ ${#batches[@]} -eq 0 ]]; then
+  ENABLE_NET="$(cfg enableNetwork false 2>/dev/null || echo false)"
+  if [[ "${ENABLE_NET}" == "True" || "${ENABLE_NET}" == "true" ]]; then
+    # network refill is FAIL-CLOSED: require an approved manifest matching BOTH the
+    # curated reference and the approved query set before any fetch.
+    QR="$(dirname "${CONFIG}")/query_rotation.json"
+    if [[ ! -f "${MANIFEST}" ]]; then log "network refill requires approved_manifest.json (absent) -> abort"; exit 3; fi
+    python3 - "${MANIFEST}" "${REFERENCE}" "${QR}" <<'PY' || { echo "manifest/query-scope mismatch -> abort" >&2; exit 3; }
+import hashlib, json, sys
+man = json.load(open(sys.argv[1]))
+def d(p): return "sha256:" + hashlib.sha256(open(p, "rb").read()).hexdigest()
+ok = man.get("referenceSha256") == d(sys.argv[2]) and man.get("querySetDigest") == d(sys.argv[3])
+sys.exit(0 if ok else 1)
+PY
+    mkdir -p "${INBOX}"
+    log "inbox empty + network enabled -> fetching UniProt page"
+    python3 "${ROOT_DIR}/scripts/fetch_uniprot.py" --config "${CONFIG}" \
+      --query-rotation "${QR}" --rotation "${ROTATION}" --inbox "${INBOX}" || { log "fetch failed"; exit 4; }
+    shopt -s nullglob; batches=("${INBOX}"/*.fasta); shopt -u nullglob
+  fi
+  if [[ ${#batches[@]} -eq 0 ]]; then log "inbox empty -> no-op"; exit 0; fi
+fi
 BATCH="${batches[0]}"
 
 # ---------- biosecurity: reference must match approved manifest digest (fail closed) ----------

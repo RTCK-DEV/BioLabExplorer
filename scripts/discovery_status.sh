@@ -15,7 +15,7 @@ if [[ -f "${LEDGER_DB}" ]]; then
   DISCOVERIES="$(python3 "${ROOT_DIR}/scripts/discovery_db.py" count-actionable --db "${LEDGER_DB}" 2>/dev/null || echo 0)"
 fi
 STOP="no"; [[ -f "${STATE_DIR}/STOP" ]] && STOP="yes"
-FREE_GB="$(df -g "${ROOT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}')"; FREE_GB="${FREE_GB:-unknown}"
+FREE_GB="$(df -g "${ROOT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || echo unknown)"
 
 echo "BioLab Perpetual Discovery — status"
 echo "cycles=${CYCLES}"

@@ -25,4 +25,16 @@ S2="$(mktemp -d)"; mkdir -p "$S2/state" "$S2/discoveries"
 OUT2="$(STATE_DIR="$S2/state" DISCOVERIES_DIR="$S2/discoveries" bash "$STATUS")"
 [[ "$(grep -c 'discoveries=' <<<"$OUT2")" == "1" ]] || { echo "FAIL: empty-ledger output"; exit 1; }
 grep -q '^discoveries=0$' <<<"$OUT2" || { echo "FAIL: empty discoveries!=0"; exit 1; }
+
+# df failure must degrade to disk_free_gb=unknown, not blank the whole readout
+S4="$(mktemp -d)"; mkdir -p "$S4/state" "$S4/discoveries" "$S4/fakebin"
+printf '#!/bin/sh\nexit 1\n' > "$S4/fakebin/df"; chmod +x "$S4/fakebin/df"
+set +e
+OUT4="$(PATH="$S4/fakebin:$PATH" STATE_DIR="$S4/state" DISCOVERIES_DIR="$S4/discoveries" bash "$STATUS")"
+rc4=$?
+set -e
+[[ "$rc4" -eq 0 ]] || { echo "FAIL: df failure aborted status (rc=$rc4)"; exit 1; }
+grep -q '^disk_free_gb=unknown$' <<<"$OUT4" || { echo "FAIL: df failure did not degrade to unknown"; exit 1; }
+grep -q '^discoveries=0$' <<<"$OUT4" || { echo "FAIL: df failure blanked the readout"; exit 1; }
+
 echo "status tests OK"

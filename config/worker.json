@@ -10,5 +10,12 @@
   "enableNetwork": false,
   "fetchPageSize": 200,
   "fetchRateLimitSeconds": 1,
-  "uniprotHost": "rest.uniprot.org"
+  "uniprotHost": "rest.uniprot.org",
+  "enableSimulation": false,
+  "simRamBudgetBytes": 17179869184,
+  "simReserveBytes": 8589934592,
+  "simMaxSeqLength": 700,
+  "simJobTimeoutSeconds": 900,
+  "enableColabFold": false,
+  "externalMsaStorePath": ""
 }

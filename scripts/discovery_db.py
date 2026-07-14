@@ -163,6 +163,32 @@ def regenerate_discoveries_md(db_path, discoveries_md):
     os.replace(tmp, discoveries_md)
 
 
+def export_new_actionable(db_path, cycle, out_path):
+    """Write [{"accession","sequence"}] for rows first recorded actionable THIS cycle.
+
+    Known limitation (deliberate, see brief): the ledger has no sequence column,
+    so sequence is always "" (seq_len 0). This does not gate folding today since
+    no backend is installed by default; a future schema extension can carry the
+    sequence if/when that matters.
+    """
+    conn = connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT accession FROM processed WHERE verdict='actionable' AND first_seen_cycle=?",
+            (cycle,),
+        ).fetchall()
+    finally:
+        conn.close()
+    candidates = [{"accession": acc, "sequence": ""} for (acc,) in rows]
+    target_dir = os.path.dirname(out_path) or "."
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(candidates, fh)
+    os.replace(tmp, out_path)
+    return len(candidates)
+
+
 def cmd_record(a):
     print(record(a.input, a.run_dir, a.db, a.discoveries, a.cycle, a.run_id))
     return 0
@@ -177,6 +203,11 @@ def cmd_count(a):
     return 0
 
 
+def cmd_export_new_actionable(a):
+    print(export_new_actionable(a.db, a.cycle, a.out))
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="discovery_db.py")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -188,6 +219,11 @@ def main(argv=None):
     c = sub.add_parser("count-actionable")
     c.add_argument("--db", required=True)
     c.set_defaults(func=cmd_count)
+    e = sub.add_parser("export-new-actionable")
+    e.add_argument("--db", required=True)
+    e.add_argument("--cycle", type=int, required=True)
+    e.add_argument("--out", required=True)
+    e.set_defaults(func=cmd_export_new_actionable)
     a = p.parse_args(argv)
     # argparse maps --run-dir -> a.run_dir, --run-id -> a.run_id
     return a.func(a)

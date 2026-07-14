@@ -5,7 +5,7 @@ python3 - "$ROOT" <<'PY'
 import json, os, sys, hashlib
 root = sys.argv[1]
 cfg = json.load(open(os.path.join(root, "config/worker.json")))
-for k in ("diskFloorGB", "maxCandidates", "maxWorkspaceBytes", "maxLogFiles"):
+for k in ("diskFloorGB", "maxCandidates", "maxWorkspaceBytes", "maxLogFiles", "maxConsecutiveFailures", "throttleSeconds", "maxDaemonLogBytes"):
     assert k in cfg and type(cfg[k]) is int, f"bad/missing int key: {k}"
 man = json.load(open(os.path.join(root, "config/approved_manifest.json")))
 assert isinstance(man.get("exclusions"), list) and man["exclusions"], "exclusions must be non-empty list"

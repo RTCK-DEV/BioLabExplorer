@@ -104,6 +104,53 @@ class DiscoveryDBTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 db.record(fa, rd, os.path.join(d, "l.db"), os.path.join(d, "D.md"), 1, "r")
 
+    def test_accession_from_header_matches_swift_rule(self):
+        # Mirrors Sources/BioLabExplorerCore/FASTAParser.swift identifier(from:)
+        # (lines 70-77): first space-token, then the middle field of a
+        # db|ACCESSION|ENTRY header, omitting empty subsequences on both splits.
+        self.assertEqual(db.accession_from_header("tr|A0A123|A0A123_BACT x"), "A0A123")
+        self.assertEqual(db.accession_from_header("A0A123 desc"), "A0A123")
+
+    def test_uniprot_pipe_header_recorded_actionable(self):
+        # Real UniProt headers are "db|ACCESSION|ENTRY description", e.g.
+        # ">tr|A0A123|A0A123_BACT some description". qualifyingCandidateIDs holds
+        # the BARE accession (candidate.sequence.id = "A0A123"), so the ledger must
+        # extract "A0A123" from the pipe-delimited header to match it -- not the
+        # whole first whitespace token ("tr|A0A123|A0A123_BACT").
+        with tempfile.TemporaryDirectory() as d:
+            rd = os.path.join(d, "cycle_x")
+            _fixture(rd, [_cand("A0A123", "MKT")], ["A0A123"])
+            fa = os.path.join(d, "in.fasta")
+            with open(fa, "w") as fh:
+                fh.write(">tr|A0A123|A0A123_BACT some description\nMKT\n")
+            dbp = os.path.join(d, "l.db")
+            n = db.record(fa, rd, dbp, os.path.join(d, "D.md"), 1, "cycle_x")
+            self.assertEqual(n, 1)
+            con = sqlite3.connect(dbp)
+            row = con.execute(
+                "SELECT verdict FROM processed WHERE accession=?", ("A0A123",)
+            ).fetchone()
+            self.assertIsNotNone(row, "no row recorded for bare accession A0A123")
+            self.assertEqual(row[0], "actionable")
+
+    def test_bare_header_recorded_actionable(self):
+        # Same qualifying accession, but via a bare ">ACC desc" header (no pipes),
+        # to prove both header forms map to the same accession and verdict.
+        with tempfile.TemporaryDirectory() as d:
+            rd = os.path.join(d, "cycle_x")
+            _fixture(rd, [_cand("A0A123", "MKT")], ["A0A123"])
+            fa = os.path.join(d, "in.fasta")
+            _fasta(fa, [("A0A123", "MKT")])
+            dbp = os.path.join(d, "l.db")
+            n = db.record(fa, rd, dbp, os.path.join(d, "D.md"), 1, "cycle_x")
+            self.assertEqual(n, 1)
+            con = sqlite3.connect(dbp)
+            row = con.execute(
+                "SELECT verdict FROM processed WHERE accession=?", ("A0A123",)
+            ).fetchone()
+            self.assertIsNotNone(row, "no row recorded for bare accession A0A123")
+            self.assertEqual(row[0], "actionable")
+
     def test_regenerate_discoveries_md(self):
         with tempfile.TemporaryDirectory() as d:
             rd = os.path.join(d, "cycle_x")

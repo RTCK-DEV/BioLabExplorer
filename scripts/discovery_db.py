@@ -51,6 +51,18 @@ def connect(db_path):
     return conn
 
 
+def accession_from_header(header):
+    # Mirror Swift FASTAParser.identifier: first space-token, then the middle
+    # pipe field of a db|ACCESSION|ENTRY header. Omit empty subsequences to
+    # match Swift's split(...) defaults.
+    tokens = header.split()               # whitespace split omits empties, like Swift split(sep:" ")
+    first_token = tokens[0] if tokens else header
+    pipe_parts = [p for p in first_token.split("|") if p]   # omit empties like Swift split(sep:"|")
+    if len(pipe_parts) >= 2:
+        return pipe_parts[1]
+    return first_token
+
+
 def parse_fasta(path):
     acc, seq = None, []
     with open(path, "r", encoding="utf-8") as fh:
@@ -59,7 +71,7 @@ def parse_fasta(path):
                 if acc is not None:
                     yield acc, "".join(seq)
                 header = line[1:].strip()
-                acc = header.split()[0] if header else ""
+                acc = accession_from_header(header) if header else ""
                 seq = []
             else:
                 seq.append(line.strip())

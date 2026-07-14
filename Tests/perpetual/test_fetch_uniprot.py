@@ -37,14 +37,26 @@ class FetchTests(unittest.TestCase):
             try:
                 out1 = fu.main(["--config", cfg, "--query-rotation", qr, "--rotation", rot, "--inbox", inbox])
                 self.assertEqual(out1, 0)
-                r = json.load(open(rot))
+                with open(rot) as fh:
+                    r = json.load(fh)
                 self.assertEqual(r["queryIndex"], 0)          # still on q1 (has next)
                 self.assertTrue(r["nextCursor"].endswith("cursor=abc"))
                 self.assertEqual(len(os.listdir(inbox)), 1)
                 fu.main(["--config", cfg, "--query-rotation", qr, "--rotation", rot, "--inbox", inbox])
-                r = json.load(open(rot))
+                with open(rot) as fh:
+                    r = json.load(fh)
                 self.assertEqual(r["queryIndex"], 1)          # page-1 had no next -> advanced to q2
                 self.assertIsNone(r["nextCursor"])
+                # Both fetches must survive on disk even if they land in the same
+                # wall-clock second: no filename collision, no silent overwrite.
+                self.assertEqual(len(os.listdir(inbox)), 2)
+                fasta_files = [f for f in os.listdir(inbox) if f.endswith(".fasta")]
+                self.assertEqual(len(fasta_files), 2)
+                contents = set()
+                for fn in fasta_files:
+                    with open(os.path.join(inbox, fn)) as fh:
+                        contents.add(fh.read())
+                self.assertEqual(contents, {">tr|A1|A1_X d\nMKT\n", ">tr|B2|B2_X d\nMMM\n"})
             finally:
                 os.environ.pop("UNIPROT_FIXTURE_DIR", None)
 

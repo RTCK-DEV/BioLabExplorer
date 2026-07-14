@@ -56,7 +56,10 @@ def fetch_page(url, host_allow, rate_limit):
         with open(os.path.join(fx, f"page-{i}.fasta"), "rb") as fh:
             body = fh.read()
         nxt_path = os.path.join(fx, f"page-{i}.next")
-        nxt = open(nxt_path).read().strip() if os.path.exists(nxt_path) else None
+        nxt = None
+        if os.path.exists(nxt_path):
+            with open(nxt_path) as fh:
+                nxt = fh.read().strip()
         with open(idx_path, "w") as fh:
             json.dump({"i": i + 1}, fh)
         return body, (nxt or None)
@@ -107,8 +110,8 @@ def main(argv=None):
     body, nxt = fetch_page(url, host, rate)
 
     os.makedirs(a.inbox, exist_ok=True)
-    out = os.path.join(a.inbox, f"uniprot_{q['id']}_{_utc()}.fasta")
-    with open(out, "wb") as fh:
+    fd, out = tempfile.mkstemp(prefix=f"uniprot_{q['id']}_{_utc()}_", suffix=".fasta", dir=a.inbox)
+    with os.fdopen(fd, "wb") as fh:
         fh.write(body)
 
     if nxt:

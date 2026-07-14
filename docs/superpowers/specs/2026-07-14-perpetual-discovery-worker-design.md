@@ -21,7 +21,7 @@
 | ペース | 6h は「1サイクルのソフト予算」。早く終われば即次へ、長引けば新規ジョブを止めて終了→次へ |
 | 上限 | サイクル数・出力に上限を設けない。ただしディスク空き**下限**で保護停止 |
 | 計算 | フルスタック: ESMFold(MPS) + OpenMM(MD) + AutoDock Vina + ColabFold + Foldseek(バンドル) + mmseqs2 + HMMER。RAM予算スケジューラ＋グレースフル縮退 |
-| 可視化 | 自己更新 HTML ダッシュボード（時系列・スコア分布・3Dmol.js構造ビューア・稼働状況） |
+| 可視化 | 自己更新 HTML ダッシュボード＋**インタラクティブ3Dタンパク質ビューア**（3Dmol.js 同梱・**pLDDT信頼度で色分け**）。時系列/スコア分布/稼働状況も表示 |
 
 ## 3. 制約・非目標（AGENTS.md 準拠）
 
@@ -127,8 +127,17 @@ logs/
 ### 5.7 Recorder
 - **責務**: `runs/cycle_<ts>/`（レポート/構造/JSON）を書き、`ledger.jsonl` 追記、`DISCOVERIES.md` に新規のみ追記、macOS ローカル通知。`.complete` マーカーで完了明示（既存慣習踏襲）。
 
-### 5.8 Dashboard Generator
-- **責務**: `ledger.jsonl` と `runs/` を読み、自己完結HTMLを再生成。CDN非依存（3Dmol.js等は同梱 or 事前取得）。
+### 5.8 Dashboard ＋ Protein Structure Viewer（可視化）
+
+**Dashboard Generator**
+- **責務**: `ledger.jsonl` と `runs/` を読み、自己完結HTMLを再生成。CDN非依存（アセット全同梱）。時系列・スコア分布・稼働状況を表示。
+
+**Protein Structure Viewer（第一級・インタラクティブ3D）**
+- **責務**: 各候補の予測構造(ESMFold/ColabFold の PDB)または AlphaFold キャッシュを **3Dmol.js(同梱)** で回転/ズーム表示。**pLDDT 信頼度**で残基を色分け（青=高信頼〜橙=低信頼）。
+- **素材**: `runs/cycle_<ts>/native_structures/*.pdb`（pLDDT = PDB の B-factor 列 / ColabFold の scores JSON）。予測が無い候補は「構造未予測」表示でフォールバック。
+- **配置**: ダッシュボード内に候補ごとの展開ビュー＋上位候補ギャラリー。SwiftUIアプリからは WKWebView で同ビューアを再利用可能（将来）。
+- **依存**: sim_queue の folding 出力・AlphaFold キャッシュ。CDN非依存。
+- **将来拡張（今回スコープ外）**: 参照へのスーパーインポーズ・2D距離/コンタクトマップ・ドッキングポーズ。
 
 ### 5.9 launchd Agent ＋ Installer
 - **責務**: `com.biolab.discovery.plist`（`KeepAlive=true`、`ThrottleInterval` で最小間隔、`RunAtLoad`、stdout/err→`logs/`）。`install_discovery_agent.sh` で load/unload/status。
@@ -156,7 +165,7 @@ logs/
 1. **M1 骨格（オフライン）**: cycle runner＋rotation＋ledger＋recorder＋status。`state/inbox` 消費で新規のみ蓄積。テスト1–4。
 2. **M2 常駐化**: launchd plist＋installer。KeepAlive連続実行・重なり回避・時間予算。
 3. **M3 ネット回転(opt-in)**: UniProt fetcher＋envelope。範囲JSON承認フロー。
-4. **M4 可視化**: dashboard generator（3Dビューア含む）。
+4. **M4 可視化**: dashboard generator ＋ **インタラクティブ3Dタンパク質ビューア(3Dmol.js同梱・pLDDT色分け)**。M4 時点は AlphaFold キャッシュ／「未予測」フォールバックで成立し、M5 の folding 出力で素材が充実する。
 5. **M5 フルスタック計算**: `setup_simulation_stack.sh`＋`sim_queue.py`（RAM予算・縮退）。ESMFold→OpenMM→Vina→ColabFold(上位のみ)→Foldseek。テスト5。
 
 各マイルストーンは独立に価値があり、M1時点で「新規のみ蓄積する半永久ワーカー」として成立する。
@@ -164,4 +173,4 @@ logs/
 ## 9. 前提・未決
 - `setup_simulation_stack.sh` の実行（多GB DL・ネット）は**ユーザー承認のもとで実施**。Claude は無断でインストール/ネットアクセスしない。
 - ColabFold は 24GB では MSA が重いため既定は reduced-MSA/上位候補限定。必要なら後で調整。
-- 3Dmol.js の同梱方法（ベンダリング）は M4 で確定。
+- 3Dmol.js の同梱方法（ベンダリング）は M4 で確定。pLDDT は PDB の B-factor 列（AlphaFold/ESMFold 慣習）を既定の色分けソースとし、ColabFold は scores JSON を併用。

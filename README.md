@@ -141,6 +141,20 @@ rate-limited; fail-closed if the manifest is absent or the reference/query diges
 The approved query set lives in `config/query_rotation.json` — editing it requires re-approving
 the manifest digest (biosecurity scope control).
 
+## Perpetual Discovery Worker (M4, dashboard)
+
+Every cycle regenerates a self-contained `discoveries/dashboard.html` (open it in a
+browser): stat tiles, new-candidates-per-cycle chart, discoveries table, and an
+interactive **3D protein viewer coloured by pLDDT** for candidates with an AlphaFold
+structure. The 3D viewer needs a locally-vendored 3Dmol.js (CDN is not used at runtime):
+
+```sh
+ALLOW_NETWORK=1 scripts/vendor_assets.sh    # one-time: download 3Dmol.js locally
+open discoveries/dashboard.html
+```
+
+Without the vendored asset the charts/table still render; the 3D section shows a note.
+
 ## Next Integration Points
 
 - Add FASTA import.

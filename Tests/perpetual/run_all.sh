@@ -9,4 +9,6 @@ bash "${DIR}/test_cycle_daemon.sh"
 bash "${DIR}/test_agent.sh"
 python3 "${DIR}/test_fetch_uniprot.py" -v
 bash "${DIR}/test_cycle_network.sh"
-echo "ALL M1+M2+M3 TESTS PASSED"
+python3 "${DIR}/test_dashboard.py" -v
+bash "${DIR}/test_dashboard_cycle.sh"
+echo "ALL M1+M2+M3+M4 TESTS PASSED"

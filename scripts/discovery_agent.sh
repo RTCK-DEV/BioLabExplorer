@@ -12,6 +12,14 @@ cfg() { python3 -c "import json;print(json.load(open('${CONFIG}')).get('$1','$2'
 gen_plist() {  # $1 = output path
   local out="$1"
   local throttle; throttle="$(cfg throttleSeconds 300)"
+  # Tie the daemon's network authorization to enableNetwork (operator-set, deliberate):
+  # installing while enableNetwork:true IS the explicit authorization to fetch. The
+  # manifest digest gate in run_discovery_cycle.sh still fail-closes every fetch regardless.
+  local net env_block=""
+  net="$(cfg enableNetwork false 2>/dev/null || echo false)"
+  if [[ "${net}" == "True" || "${net}" == "true" ]]; then
+    env_block=$'  <key>EnvironmentVariables</key>\n  <dict><key>ALLOW_NETWORK</key><string>1</string></dict>\n'
+  fi
   mkdir -p "$(dirname "${out}")" "${LOG_DIR}"
   cat > "${out}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -24,7 +32,7 @@ gen_plist() {  # $1 = output path
     <string>/bin/bash</string>
     <string>${ROOT_DIR}/scripts/run_discovery_cycle.sh</string>
   </array>
-  <key>WorkingDirectory</key><string>${ROOT_DIR}</string>
+${env_block}  <key>WorkingDirectory</key><string>${ROOT_DIR}</string>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>${throttle}</integer>
   <key>RunAtLoad</key><true/>
@@ -42,7 +50,9 @@ case "${1:-}" in
     gen_plist "${PLIST_INSTALLED}"
     launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "${PLIST_INSTALLED}"
-    echo "installed + loaded ${LABEL} (throttle=$(cfg throttleSeconds 300)s). Stop: scripts/discovery_agent.sh uninstall" ;;
+    net="$(cfg enableNetwork false)"
+    if [[ "${net}" == "True" || "${net}" == "true" ]]; then mode="NETWORKED"; else mode="offline"; fi
+    echo "installed + loaded ${LABEL} (mode=${mode}, throttle=$(cfg throttleSeconds 300)s). Stop: scripts/discovery_agent.sh uninstall" ;;
   uninstall)
     launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
     rm -f "${PLIST_INSTALLED}"

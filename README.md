@@ -115,12 +115,25 @@ scripts/discovery_agent.sh uninstall   # true stop (unload + remove)
 ## Perpetual Discovery Worker (M3, network rotation — opt-in)
 
 To keep finding NEW candidates, enable UniProt fetching (cursor-paged, one page/cycle):
-set `enableNetwork: true` in `config/worker.json`, ensure `config/approved_manifest.json`
-matches BOTH the curated reference AND `config/query_rotation.json` (digests), then run the
-daemon with the network switch ON:
+
+1. Set `enableNetwork: true` in `config/worker.json`.
+2. Ensure `config/approved_manifest.json` matches BOTH the curated reference AND
+   `config/query_rotation.json` (digests).
+3. Install the daemon: `scripts/discovery_agent.sh install`.
 
 ```sh
-ALLOW_NETWORK=1 scripts/run_discovery_cycle.sh    # one networked cycle (manual)
+scripts/discovery_agent.sh install
+```
+
+Because `enableNetwork` is true, `install` bakes `ALLOW_NETWORK=1` into the generated launchd
+plist's `EnvironmentVariables`, so the installed daemon fetches a page whenever the inbox is
+empty each cycle — `install` prints `mode=NETWORKED` to confirm. Leave `enableNetwork: false`
+for an offline daemon (`install` prints `mode=offline`); its plist never sets `ALLOW_NETWORK`.
+
+Manual alternative — run a single networked cycle by hand, without installing the daemon:
+
+```sh
+ALLOW_NETWORK=1 scripts/run_discovery_cycle.sh    # one networked cycle (manual, one-shot)
 ```
 
 Envelope: never hits the network unless `ALLOW_NETWORK=1` AND the host is `uniprotHost`;

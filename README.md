@@ -96,6 +96,22 @@ Guardrails: `state/STOP` stops gracefully; the cycle pauses under `diskFloorGB`/
 (config/worker.json) and aborts if the reference digest ≠ `config/approved_manifest.json`.
 A single-instance lock (`state/.lock`) prevents overlap. Tests: `bash Tests/perpetual/run_all.sh`.
 
+## Perpetual Discovery Worker (M2, daemon)
+
+Run the offline cycle continuously via launchd (back-to-back, min spacing
+`throttleSeconds`). Falls back to the same guardrails; N consecutive failures
+(`maxConsecutiveFailures`) trip a circuit breaker (`state/PAUSED`).
+
+```sh
+swift build -c release
+scripts/discovery_agent.sh install     # load the launchd agent
+scripts/discovery_agent.sh status      # loaded? paused? + discovery status
+scripts/discovery_agent.sh resume      # clear PAUSED + failure streak
+scripts/discovery_agent.sh uninstall   # true stop (unload + remove)
+```
+
+`state/STOP` pauses cycles without unloading; true stop is `uninstall`.
+
 ## Next Integration Points
 
 - Add FASTA import.

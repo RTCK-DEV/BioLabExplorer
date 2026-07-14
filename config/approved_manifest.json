@@ -1,0 +1,11 @@
+{
+  "referenceSha256": "sha256:2497b5338b5e3aafc15263e0aaee9ca425ffa7be501986dabcf009d8b3540bfc",
+  "querySetId": "offline-inbox",
+  "reviewer": "unset",
+  "reviewedDate": "2026-07-14",
+  "exclusions": [
+    "virulence factors",
+    "toxin biosynthesis gene clusters",
+    "select-agent homologs"
+  ]
+}

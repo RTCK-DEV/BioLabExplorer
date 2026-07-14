@@ -159,6 +159,25 @@ the vendored asset the charts/table still render; the 3D section shows a note. T
 downloads atomically (via a `.tmp` file) and prints the sha256 of what it fetched; set
 `THREEDMOL_SHA256=<hash>` to pin and verify it on future runs.
 
+## Perpetual Discovery Worker (M5, simulation stack — opt-in)
+
+Each cycle can run a simulation queue over the cycle's NEW actionable candidates.
+Backends are detected at runtime; anything missing is reported in
+`runs/<cycle>/sim/summary.json` and skipped — the cycle never fails over simulation.
+Admission is bounded by a RAM budget (`simRamBudgetBytes` minus `simReserveBytes`),
+GPU work is serialised, and folding skips sequences longer than `simMaxSeqLength`.
+
+```sh
+scripts/setup_simulation_stack.sh --plan        # review what it installs (offline)
+ALLOW_NETWORK=1 scripts/setup_simulation_stack.sh   # multi-GB install (your call)
+# then set enableSimulation: true in config/worker.json (and SIM_BIN_DIR if using a conda env)
+```
+
+Available today without any install: mmseqs2, HMMER, bundled Foldseek.
+ColabFold is NOT part of the stack (needs ~940GB DB / ~128GB RAM locally). Optionally
+mount an **External MSA Store** with precomputed a3m and set `externalMsaStorePath` +
+`enableColabFold` — folding then uses those MSAs only; the public MSA server is never contacted.
+
 ## Next Integration Points
 
 - Add FASTA import.

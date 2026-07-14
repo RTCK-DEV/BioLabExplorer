@@ -11,4 +11,7 @@ python3 "${DIR}/test_fetch_uniprot.py" -v
 bash "${DIR}/test_cycle_network.sh"
 python3 "${DIR}/test_dashboard.py" -v
 bash "${DIR}/test_dashboard_cycle.sh"
-echo "ALL M1+M2+M3+M4 TESTS PASSED"
+python3 "${DIR}/test_sim_queue.py" -v
+bash "${DIR}/test_sim_cycle.sh"
+bash "${DIR}/test_setup_stack.sh"
+echo "ALL M1..M5 TESTS PASSED"

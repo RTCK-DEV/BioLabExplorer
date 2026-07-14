@@ -133,6 +133,13 @@ def record(input_fasta, run_dir, db_path, discoveries_md, cycle, run_id):
     return new_actionable
 
 
+def _fmt_score(score):
+    """Round to 3 decimals so DISCOVERIES.md agrees with the dashboard table;
+    None (no score recorded) renders as an em dash. Display-only -- the DB
+    value itself is left untouched."""
+    return f"{score:.3f}" if score is not None else "—"
+
+
 def regenerate_discoveries_md(db_path, discoveries_md):
     conn = connect(db_path)
     try:
@@ -152,7 +159,7 @@ def regenerate_discoveries_md(db_path, discoveries_md):
         fh.write("| cycle | accession | score | classification | when | run |\n")
         fh.write("|---|---|---|---|---|---|\n")
         for c, acc, score, cls, ts, run_id in rows:
-            fh.write(f"| {c} | {acc} | {score} | {cls} | {ts} | {run_id} |\n")
+            fh.write(f"| {c} | {acc} | {_fmt_score(score)} | {cls} | {ts} | {run_id} |\n")
     os.replace(tmp, discoveries_md)
 
 

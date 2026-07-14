@@ -14,7 +14,6 @@ import json
 import os
 import sqlite3
 import tempfile
-from collections import Counter
 
 MAX_VIEWERS = 6  # cap embedded PDBs to keep the HTML small
 
@@ -27,31 +26,79 @@ def _load(path, default):
         return default
 
 
-def read_ledger(db_path):
-    if not os.path.exists(db_path):
-        return []
-    conn = sqlite3.connect(db_path)
+def counts(db):
+    """(n_actionable, n_screened) via one GROUP BY query. Tolerates a missing DB."""
+    if not os.path.exists(db):
+        return (0, 0)
+    conn = sqlite3.connect(db)
     try:
-        rows = conn.execute(
-            "SELECT first_seen_cycle,accession,score,classification,ts,run_id,verdict"
-            " FROM processed ORDER BY first_seen_cycle,accession"
+        rows = conn.execute("SELECT verdict, COUNT(*) FROM processed GROUP BY verdict").fetchall()
+    finally:
+        conn.close()
+    by_verdict = dict(rows)
+    return (by_verdict.get("actionable", 0), by_verdict.get("screened", 0))
+
+
+def recent_actionable(db, limit=200):
+    """Newest-first actionable rows for the discoveries table (bounded + indexed)."""
+    if not os.path.exists(db):
+        return []
+    conn = sqlite3.connect(db)
+    try:
+        return conn.execute(
+            "SELECT first_seen_cycle,accession,score,classification,ts,run_id"
+            " FROM processed WHERE verdict='actionable'"
+            " ORDER BY first_seen_cycle DESC, accession DESC LIMIT ?",
+            (limit,),
         ).fetchall()
     finally:
         conn.close()
-    return rows
+
+
+def per_cycle_counts(db):
+    """{cycle: new-actionable-count}, for the chart."""
+    if not os.path.exists(db):
+        return {}
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute(
+            "SELECT first_seen_cycle, COUNT(*) FROM processed"
+            " WHERE verdict='actionable' GROUP BY first_seen_cycle"
+        ).fetchall()
+    finally:
+        conn.close()
+    return dict(rows)
+
+
+def top_by_score(db, limit=32):
+    """Highest-score-first actionable rows: candidates for the 3D viewer."""
+    if not os.path.exists(db):
+        return []
+    conn = sqlite3.connect(db)
+    try:
+        return conn.execute(
+            "SELECT first_seen_cycle,accession,score,classification,ts,run_id"
+            " FROM processed WHERE verdict='actionable'"
+            " ORDER BY score DESC, accession ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
 
 
 def find_pdb(cache_dir, accession):
     if not accession or not os.path.isdir(cache_dir):
         return None
-    hits = sorted(glob.glob(os.path.join(cache_dir, f"AF-{accession}-*.pdb")))
+    hits = sorted(glob.glob(os.path.join(cache_dir, f"AF-{glob.escape(accession)}-*.pdb")))
     return hits[0] if hits else None
 
 
 def svg_bar_chart(counts_by_cycle):
     if not counts_by_cycle:
         return '<p class="muted">no cycles yet</p>'
-    cycles = sorted(counts_by_cycle)
+    # Window to the most recent cycles so bars always fit the fixed viewBox,
+    # no matter how long the worker has been running.
+    cycles = sorted(counts_by_cycle)[-60:]
     vals = [counts_by_cycle[c] for c in cycles]
     mx = max(vals) or 1
     w, h, pad = 520, 120, 4
@@ -61,21 +108,29 @@ def svg_bar_chart(counts_by_cycle):
         bh = int((v / mx) * (h - 20))
         x = pad + i * (bw + pad)
         y = h - bh
-        bars.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{bh}" rx="2" fill="var(--ac)"><title>cycle {cycles[i]}: {v}</title></rect>')
+        title = f"cycle {html.escape(str(cycles[i]))}: {html.escape(str(v))}"
+        bars.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{bh}" rx="2" fill="var(--ac)"><title>{title}</title></rect>')
     return f'<svg viewBox="0 0 {w} {h}" width="100%" role="img" aria-label="new actionable candidates per cycle">{"".join(bars)}</svg>'
 
 
-def build_html(rows, rotation, config, cache_dir, assets_dir):
-    actionable = [r for r in rows if r[6] == "actionable"]
-    screened = [r for r in rows if r[6] == "screened"]
+def _fmt_score(v):
+    """Render scores rounded to 3 decimals so the dashboard and DISCOVERIES.md
+    agree; non-numeric/missing scores render as an em dash. Display-only -- the
+    DB value itself is left untouched."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return f"{v:.3f}"
+    return "—"
+
+
+def build_html(n_actionable, n_screened, table_rows, cycle_counts, top_candidates,
+                rotation, config, cache_dir, assets_dir):
     cycle = rotation.get("cycle", 0)
     net = "on" if config.get("enableNetwork") else "off"
-    counts = Counter(r[0] for r in actionable)
 
     esc = html.escape
     tiles = [
-        ("cycles", cycle), ("discoveries (actionable)", len(actionable)),
-        ("screened (seen)", len(screened)), ("network", net),
+        ("cycles", cycle), ("discoveries (actionable)", n_actionable),
+        ("screened (seen)", n_screened), ("network", net),
     ]
     tiles_html = "".join(
         f'<div class="tile"><div class="n">{esc(str(v))}</div><div class="l">{esc(k)}</div></div>'
@@ -83,17 +138,18 @@ def build_html(rows, rotation, config, cache_dir, assets_dir):
     )
 
     trows = "".join(
-        f'<tr><td>{esc(str(r[0]))}</td><td>{esc(str(r[1]))}</td><td>{esc(str(r[2]))}</td>'
+        f'<tr><td>{esc(str(r[0]))}</td><td>{esc(str(r[1]))}</td><td>{esc(_fmt_score(r[2]))}</td>'
         f'<td>{esc(str(r[3]))}</td><td>{esc(str(r[4]))}</td></tr>'
-        for r in actionable[:200]
+        for r in table_rows
     )
 
-    # 3D viewers: top actionable candidates that have an AlphaFold structure
+    # 3D viewers: highest-SCORING actionable candidates that have an AlphaFold
+    # structure (top_by_score, not merely the most recently seen).
     asset = os.path.join(assets_dir, "3Dmol-min.js")
     have_3dmol = os.path.exists(asset)
     viewers, inits = [], []
     n = 0
-    for r in actionable:
+    for r in top_candidates:
         if n >= MAX_VIEWERS:
             break
         pdb = find_pdb(cache_dir, r[1])
@@ -154,7 +210,7 @@ def build_html(rows, rotation, config, cache_dir, assets_dir):
   <div class="muted">Local-only triage dashboard. Unvalidated in-silico predictions; not for external use without review.</div>
   <div class="tiles">{tiles_html}</div>
   <h2>New actionable candidates / cycle</h2>
-  {svg_bar_chart(counts)}
+  {svg_bar_chart(cycle_counts)}
   <h2>Discoveries (actionable)</h2>
   <table><thead><tr><th>cycle</th><th>accession</th><th>score</th><th>classification</th><th>when</th></tr></thead>
   <tbody>{trows or '<tr><td colspan="5" class="muted">none yet</td></tr>'}</tbody></table>
@@ -171,10 +227,14 @@ def main(argv=None):
     ap.add_argument("--assets-dir", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
-    rows = read_ledger(a.db)
+    n_actionable, n_screened = counts(a.db)
+    table_rows = recent_actionable(a.db, limit=200)
+    cycle_counts = per_cycle_counts(a.db)
+    top_candidates = top_by_score(a.db, limit=32)
     rotation = _load(a.rotation, {})
     config = _load(a.config, {})
-    doc = build_html(rows, rotation, config, a.alphafold_cache, a.assets_dir)
+    doc = build_html(n_actionable, n_screened, table_rows, cycle_counts, top_candidates,
+                      rotation, config, a.alphafold_cache, a.assets_dir)
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(a.out) or ".", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:

@@ -149,11 +149,15 @@ interactive **3D protein viewer coloured by pLDDT** for candidates with an Alpha
 structure. The 3D viewer needs a locally-vendored 3Dmol.js (CDN is not used at runtime):
 
 ```sh
-ALLOW_NETWORK=1 scripts/vendor_assets.sh    # one-time: download 3Dmol.js locally
+ALLOW_NETWORK=1 scripts/vendor_assets.sh    # one-time: download 3Dmol.js + refresh dashboard.html
 open discoveries/dashboard.html
 ```
 
-Without the vendored asset the charts/table still render; the 3D section shows a note.
+`vendor_assets.sh` regenerates `discoveries/dashboard.html` itself right after a successful
+download, so the 3D viewer appears immediately — no need to wait for the next cycle. Without
+the vendored asset the charts/table still render; the 3D section shows a note. The script
+downloads atomically (via a `.tmp` file) and prints the sha256 of what it fetched; set
+`THREEDMOL_SHA256=<hash>` to pin and verify it on future runs.
 
 ## Next Integration Points
 

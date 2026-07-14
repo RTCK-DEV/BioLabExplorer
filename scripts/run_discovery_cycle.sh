@@ -28,6 +28,7 @@ cfg() { python3 -c "import json;print(json.load(open('${CONFIG}')).get('$1','$2'
 
 # ---------- preflight guardrails (NO run dir / ledger / rotation side effects) ----------
 if [[ -f "${STATE_DIR}/STOP" ]]; then log "STOP present -> graceful stop"; exit 0; fi
+if [[ -f "${STATE_DIR}/PAUSED" ]]; then log "PAUSED (circuit breaker) -> no-op; resume via scripts/discovery_agent.sh resume"; exit 0; fi
 if [[ ! -s "${REFERENCE}" ]]; then log "missing reference: ${REFERENCE}"; exit 2; fi
 
 DISK_FLOOR_GB="$(cfg diskFloorGB 10)"
@@ -66,18 +67,21 @@ sys.exit(0 if want == got else 1)
 PY
 fi
 
-# ---------- single-instance lock (atomic mkdir; reclaim stale) ----------
+# ---------- single-instance lock (atomic mkdir; reclaim stale incl. pidless) ----------
 mkdir -p "${STATE_DIR}" "${LOG_DIR}"
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
   oldpid="$(cat "${LOCK_DIR}/pid" 2>/dev/null || echo "")"
-  if [[ -n "${oldpid}" ]] && ! kill -0 "${oldpid}" 2>/dev/null; then
-    log "reclaiming stale lock (pid ${oldpid})"; rm -rf "${LOCK_DIR}"
+  # Reclaim if no pid was ever written (died between mkdir and pid write) OR the pid is dead.
+  if [[ -z "${oldpid}" ]] || ! kill -0 "${oldpid}" 2>/dev/null; then
+    log "reclaiming stale lock (pid='${oldpid:-none}')"; rm -rf "${LOCK_DIR}"
     mkdir "${LOCK_DIR}" 2>/dev/null || { log "lock race -> exit"; exit 0; }
   else
-    log "another cycle holds the lock -> exit"; exit 0
+    log "another live cycle holds the lock (pid ${oldpid}) -> exit"; exit 0
   fi
 fi
 echo "$$" > "${LOCK_DIR}/pid"
+# Release the lock even if we die before the main finish trap is installed.
+trap 'rmdir "${LOCK_DIR}" 2>/dev/null || rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT
 
 # ---------- proceed: create run dir, compute cycle ----------
 mkdir -p "${INBOX}" "${PROCESSED}" "${DISCOVERIES_DIR}" "${RUNS_DIR}"
@@ -96,11 +100,23 @@ RUN_DIR="$(mktemp -d "${RUNS_DIR}/cycle_${TS}_XXXXXX")"
 RUN_ID="$(basename "${RUN_DIR}")"
 touch "${RUN_DIR}/.in_progress"
 
+FAILCOUNT_FILE="${STATE_DIR}/consecutive_failures"
+MAX_FAILS="$(cfg maxConsecutiveFailures 5)"
 finish() {
   local status=$?
   rm -f "${RUN_DIR}/.in_progress"
-  if [[ "${status}" -eq 0 ]]; then date -u +"%Y-%m-%dT%H:%M:%SZ" > "${RUN_DIR}/.complete"
-  else echo "status=${status}" > "${RUN_DIR}/.failed"; fi
+  if [[ "${status}" -eq 0 ]]; then
+    date -u +"%Y-%m-%dT%H:%M:%SZ" > "${RUN_DIR}/.complete"
+    rm -f "${FAILCOUNT_FILE}"
+  else
+    echo "status=${status}" > "${RUN_DIR}/.failed"
+    local n; n="$(cat "${FAILCOUNT_FILE}" 2>/dev/null || echo 0)"; n=$((n + 1))
+    echo "${n}" > "${FAILCOUNT_FILE}"
+    if [[ "${n}" -ge "${MAX_FAILS}" ]]; then
+      date -u +"%Y-%m-%dT%H:%M:%SZ" > "${STATE_DIR}/PAUSED"
+      log "consecutive failures ${n} >= ${MAX_FAILS} -> circuit breaker PAUSED"
+    fi
+  fi
   rmdir "${LOCK_DIR}" 2>/dev/null || rm -rf "${LOCK_DIR}" 2>/dev/null || true
 }
 trap finish EXIT

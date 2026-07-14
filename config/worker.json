@@ -3,5 +3,7 @@
   "maxCandidates": 20,
   "maxWorkspaceBytes": 21474836480,
   "maxLogFiles": 200,
-  "budgetSeconds": 21600
+  "budgetSeconds": 21600,
+  "maxConsecutiveFailures": 5,
+  "throttleSeconds": 300
 }

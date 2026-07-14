@@ -110,6 +110,11 @@ class DiscoveryDBTests(unittest.TestCase):
         # db|ACCESSION|ENTRY header, omitting empty subsequences on both splits.
         self.assertEqual(db.accession_from_header("tr|A0A123|A0A123_BACT x"), "A0A123")
         self.assertEqual(db.accession_from_header("A0A123 desc"), "A0A123")
+        # Space-only split, like Swift split(separator: " "): a header with a TAB
+        # (not a space) has no space to split on, so the whole string is the first
+        # token, and (no pipe) is returned as-is -- it must NOT be truncated to
+        # "A0A123" the way an all-whitespace split() would.
+        self.assertEqual(db.accession_from_header("A0A123\tdesc"), "A0A123\tdesc")
 
     def test_uniprot_pipe_header_recorded_actionable(self):
         # Real UniProt headers are "db|ACCESSION|ENTRY description", e.g.

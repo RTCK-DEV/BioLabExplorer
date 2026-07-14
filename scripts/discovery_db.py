@@ -55,7 +55,7 @@ def accession_from_header(header):
     # Mirror Swift FASTAParser.identifier: first space-token, then the middle
     # pipe field of a db|ACCESSION|ENTRY header. Omit empty subsequences to
     # match Swift's split(...) defaults.
-    tokens = header.split()               # whitespace split omits empties, like Swift split(sep:" ")
+    tokens = [t for t in header.split(" ") if t]  # space-only split (matches Swift split(sep:" "))
     first_token = tokens[0] if tokens else header
     pipe_parts = [p for p in first_token.split("|") if p]   # omit empties like Swift split(sep:"|")
     if len(pipe_parts) >= 2:
@@ -138,7 +138,7 @@ def regenerate_discoveries_md(db_path, discoveries_md):
     try:
         rows = conn.execute(
             "SELECT first_seen_cycle,accession,score,classification,ts,run_id"
-            " FROM processed WHERE verdict='actionable' ORDER BY first_seen_cycle,accession"
+            " FROM processed WHERE verdict='actionable' ORDER BY first_seen_cycle,accession,seq_sha256"
         ).fetchall()
     finally:
         conn.close()

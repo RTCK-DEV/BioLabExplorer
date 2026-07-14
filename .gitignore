@@ -13,7 +13,6 @@ dist/
 # --- Large corpora (re-fetchable / regenerable) ---
 data/public_probe/
 
-# --- Perpetual-worker runtime state & generated outputs ---
 # --- Perpetual worker runtime (local only) ---
 state/*
 !state/inbox/

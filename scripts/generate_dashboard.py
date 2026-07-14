@@ -105,7 +105,7 @@ def build_html(rows, rotation, config, cache_dir, assets_dir):
         viewers.append(
             f'<div class="card"><div class="id">{esc(str(r[1]))} · pLDDT</div>'
             f'<div id="{vid}" class="mol"></div>'
-            f'<script type="text/plain" id="{vid}-pdb">{esc(data)}</script></div>'
+            f'<pre hidden id="{vid}-pdb">{esc(data)}</pre></div>'
         )
         inits.append(
             f'initViewer("{vid}", document.getElementById("{vid}-pdb").textContent);'

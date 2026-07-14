@@ -200,4 +200,12 @@ shopt -s nullglob; logs=("${LOG_DIR}"/cycle-*.log); shopt -u nullglob
 if [[ ${#logs[@]} -gt ${MAX_LOG_FILES} ]]; then
   ls -1t "${LOG_DIR}"/cycle-*.log | tail -n +$((MAX_LOG_FILES + 1)) | while read -r f; do rm -f "$f"; done
 fi
+
+# regenerate the self-contained dashboard (never fail the cycle over visualization)
+ALPHAFOLD_CACHE="${ALPHAFOLD_CACHE:-${ROOT_DIR}/data/alphafold_cache}"
+python3 "${ROOT_DIR}/scripts/generate_dashboard.py" \
+  --db "${LEDGER_DB}" --rotation "${ROTATION}" --config "${CONFIG}" \
+  --alphafold-cache "${ALPHAFOLD_CACHE}" --assets-dir "${DISCOVERIES_DIR}/assets" \
+  --out "${DISCOVERIES_DIR}/dashboard.html" >/dev/null 2>&1 || log "dashboard generation skipped (non-fatal)"
+
 log "cycle ${CYCLE} complete"

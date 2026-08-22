@@ -40,7 +40,7 @@ upstream terms:
 | Path | Contents | Source | Terms |
 | --- | --- | --- | --- |
 | `data/curated_reference/` | curated reference FASTA (24 KB) | UniProt | CC BY 4.0 |
-| `data/public_probe/` (not committed) | 200-sequence query set | UniProt | CC BY 4.0 |
+| `data/public_probe/unreviewed_uncharacterized_bacteria_200.fasta` | 200-sequence query set (300 KB) | UniProt | CC BY 4.0 |
 | `data/alphafold_cache/`, `data/structures/` | 6 predicted structures (~2 MB) | AlphaFold Protein Structure Database, EMBL-EBI / Google DeepMind | CC BY 4.0 |
 | `data/docking/penicillin_g_cid5904.sdf` | one ligand, PubChem CID 5904 | PubChem, NCBI | public domain |
 | `data/examples/esmfold_smoke.fasta` | 40-residue synthetic fixture | this project | MIT |

@@ -11,7 +11,11 @@ dist/
 .DS_Store
 
 # --- Large corpora (re-fetchable / regenerable) ---
-data/public_probe/
+# Swiss-Prot and its derived subsets are hundreds of MB and are re-fetchable.
+# The 200-sequence query set is 300 KB and is what the quickstart, the public
+# probe and every benchmark in the README actually run on, so it ships.
+data/public_probe/*
+!data/public_probe/unreviewed_uncharacterized_bacteria_200.fasta
 
 # --- Perpetual worker runtime (local only) ---
 state/*

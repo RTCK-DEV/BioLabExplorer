@@ -15,6 +15,48 @@ tools are optional adapters: if MMseqs2, HMMER, Foldseek, OpenMM or Ollama are
 missing, the run says so and continues with the native Swift implementation.
 No cloud LLM is contacted on any code path.
 
+![The BioLabExplorer window: settings and tool readiness on the left, ranked
+candidates in the middle, evidence for the selected candidate on the
+right.](docs/images/app-layout.svg)
+
+## Start here
+
+```sh
+git clone https://github.com/RTCK-reina/BioLabExplorer.git
+cd BioLabExplorer
+scripts/doctor.sh --build
+```
+
+`doctor.sh` checks whether this machine can run the project, prints the exact
+command for anything that is missing, builds, and then ranks a real
+200-sequence UniProt query set from files already in the repository. It
+downloads nothing, installs nothing, and never asks for an administrator
+password.
+
+If it finishes, you have a working install and a report to read:
+
+```sh
+open runs/doctor/discovery-report.md     # the ranking and the evidence behind it
+swift run BioLabExplorer                 # the same thing as an app
+```
+
+Run `scripts/doctor.sh` on its own any time to see what is installed, what is
+missing, and what each missing piece would enable. Nothing in that list is
+required: the default path uses no external tool at all.
+
+Stuck? Jump to [Troubleshooting](#troubleshooting).
+
+## Is this for you?
+
+| You want to… | This project |
+| --- | --- |
+| Narrow thousands of uncharacterized proteins down to a shortlist worth a human afternoon | **Yes.** That is the whole job. |
+| Run it on your own machine, offline, with results reproducible byte for byte | **Yes.** Nothing leaves the machine without `--allow-network`. |
+| Predict what a protein *does* | **No.** It ranks how *worth looking at* a sequence is. |
+| Point it at your own FASTA | **Yes.** `--input your.fasta`, or Import FASTA in the app. |
+| Run it on Windows or Linux | **No.** macOS 15+ only. |
+| Use it without MMseqs2, HMMER, OpenMM or a local LLM | **Yes.** Each one is optional and reported when absent. |
+
 ## What this is, and what it is not
 
 **It is** a prioritisation aid. It answers "of these ten thousand
@@ -27,11 +69,27 @@ is, not how confident the biology is. Optional Pfam domains and optional local
 LLM wording are advisory: neither can move a score, a classification, or the
 validation verdict, and the tests enforce that.
 
-## Quickstart
+### Reading the result
+
+`discovery-report.md` lists candidates best first. For each one:
+
+- **Novelty** — how far it sits from anything in the reference set. High means
+  "nothing known looks much like this", not "this is important".
+- **Confidence** — how well the evidence hangs together. Low confidence with
+  high novelty usually means a junk sequence, not a discovery.
+- **Compute value** — how likely heavier analysis is to pay off, so an
+  expensive structure prediction goes where it counts.
+- **Evidence** — the specific reasons behind those numbers, each with its own
+  weight, so a score is never a figure you have to take on trust.
+- **Run Notes** — what happened, including every tool that was unavailable and
+  every transformation applied to your input.
+
+A candidate marked *actionable* in `discovery-validation.json` cleared every
+threshold listed in that same file. Nothing else is a recommendation.
+
+## Quickstart, step by step
 
 ```sh
-git clone https://github.com/RTCK-reina/BioLabExplorer.git
-cd BioLabExplorer
 swift build
 swift run BioLabExplorerChecks                 # ~15 s, no external tools needed
 
@@ -435,9 +493,84 @@ affinity of −7.941 kcal/mol. OpenCL context creation failed on this host, so t
 recorded release path is the CPU fallback — which is why `openmmPlatform: "auto"`
 resolves to `CPU` on macOS.
 
+## Troubleshooting
+
+Run `scripts/doctor.sh` first — it names most of these and gives you the exact
+command. The rest are the ones that confuse people.
+
+**`swift: command not found`**
+Install Apple's command line tools: `xcode-select --install`. Nothing else is
+needed; a full Xcode install works too but is not required.
+
+**"BioLab Explorer" cannot be opened because the developer cannot be verified**
+The app you built is signed ad-hoc, not notarized, because this project has no
+Apple Developer certificate. macOS blocks it on first open. Either right-click
+the app and choose Open (which offers an "Open anyway" button), or clear the
+quarantine flag on the copy you just built yourself:
+
+```sh
+xattr -dr com.apple.quarantine "dist/BioLab Explorer.app"
+```
+
+Only do that for an app you built from this source yourself. `swift run
+BioLabExplorer` sidesteps the whole thing.
+
+**A tool I have installed is reported as missing**
+An app launched from Finder inherits launchd's `PATH`, not your shell's, so
+Homebrew tools used to disappear inside the app. The probe now searches
+`/opt/homebrew/bin`, `/usr/local/bin` and `/opt/local/bin` explicitly. If your
+tool lives somewhere else, point at it:
+
+```sh
+export BIOLAB_TOOL_SEARCH_PATHS="/my/prefix/bin:/another/bin"
+```
+
+Press the refresh button beside **Tool Readiness** in the app to probe again.
+
+**`--pfam` says the database is not indexed**
+HMMER needs `hmmpress` to build the index next to `Pfam-A.hmm`:
+
+```sh
+hmmpress /path/to/Pfam-A.hmm
+```
+
+`scripts/setup_pfam.sh` does this for you. Run it with `--plan` first to see
+what it would download.
+
+**`--summarize` says the ollama server is not answering**
+The Homebrew build does not start a server for you:
+
+```sh
+ollama serve                    # this shell only
+brew services start ollama      # keep it running
+```
+
+**`--summarize` says my model is not installed, but I have it**
+`ollama` resolves a bare name to the `:latest` tag, so having `llama3.2:1b`
+does not satisfy `llama3.2`. The message lists what you do have — pass one of
+those: `--summarize llama3.2:1b`.
+
+**Tests print SKIPPED**
+That is the suite telling you a tool it needs is absent, rather than pretending
+to pass. The Pfam suite needs HMMER, the integration suites need
+`swift build -c release`, and the OpenMM suite needs a Python with OpenMM. The
+message always names what is missing.
+
+**The results changed between two runs**
+They should not. The ranking is bit-for-bit reproducible, and
+`Tests/perpetual/test_determinism.sh` enforces it. If you see a difference,
+that is a bug worth reporting — include both `run-*.json` files.
+
+**Nothing is actionable**
+`discovery-validation.json` lists every threshold and which candidates cleared
+them. A run with no actionable candidate is a real answer about that input, not
+a failure. `--require-discovery` turns it into exit code 2 when you want a
+pipeline to stop there.
+
 ## Development
 
 ```sh
+scripts/doctor.sh                    # what this machine has and what it is missing
 swift build                          # debug
 swift run BioLabExplorerChecks       # Swift checks (fast, no external tools)
 swift build -c release               # needed by the integration tests

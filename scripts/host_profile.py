@@ -36,8 +36,12 @@ AUTO_KEYS = (
     "maxWorkspaceBytes",
     "simMaxCpuJobs",
     "esmfoldDevice",
-    "openmmPlatform",
 )
+
+# openmmPlatform is deliberately NOT resolved here. openmm_relax.py probes the
+# platforms for real, in order, and records every attempt in its metrics file.
+# Guessing here as well produced two different "auto" answers for one question,
+# and the guess was the one that could be wrong.
 
 # Conservative fallbacks used when the host cannot be probed.
 FALLBACK_MEMORY_BYTES = 8 * GIB
@@ -142,17 +146,6 @@ def _auto_esmfold_device(host):
     return "mps" if host.get("appleSilicon") else "cpu"
 
 
-def _auto_openmm_platform(host):
-    if host.get("nvidiaGpuDetected"):
-        return "CUDA"
-    if host.get("system") == "Darwin":
-        # Apple deprecated OpenCL and context creation is unreliable on Apple
-        # Silicon; CPU is the reproducible path. openmmAllowCpuFallback keeps
-        # an explicit OpenCL request working where it does succeed.
-        return "CPU"
-    return "OpenCL"
-
-
 def resolve_config(cfg, path=None, host=None):
     """Return (resolved_config, notes). The input mapping is not mutated."""
     resolved = dict(cfg)
@@ -195,13 +188,6 @@ def resolve_config(cfg, path=None, host=None):
             "esmfoldDevice",
             _auto_esmfold_device(host),
             "Metal (mps) on Apple Silicon, CPU elsewhere",
-        )
-
-    if resolved.get("openmmPlatform") == AUTO:
-        record(
-            "openmmPlatform",
-            _auto_openmm_platform(host),
-            "CUDA when an NVIDIA GPU is present, CPU on macOS, OpenCL otherwise",
         )
 
     return resolved, notes

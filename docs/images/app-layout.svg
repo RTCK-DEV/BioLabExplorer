@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="BioLabExplorer window layout: settings and tool readiness on the left, ranked candidates in the middle, evidence for the selected candidate on the right.">
+  <rect width="900" height="470" rx="10" fill="#1c1c1e"/>
+  <rect x="16" y="16" width="868" height="26" rx="6" fill="#2c2c2e"/>
+  <circle cx="34" cy="29" r="5" fill="#ff5f57"/><circle cx="50" cy="29" r="5" fill="#febc2e"/><circle cx="66" cy="29" r="5" fill="#28c840"/>
+  <text x="450" y="34" fill="#8e8e93" font-size="12" text-anchor="middle">BioLab Explorer</text>
+
+  <!-- left pane -->
+  <rect x="16" y="50" width="250" height="404" rx="8" fill="#242426" stroke="#3a3a3c"/>
+  <text x="32" y="76" fill="#f2f2f7" font-size="14" font-weight="600">BioLab Explorer</text>
+  <text x="32" y="94" fill="#8e8e93" font-size="11">Local run complete</text>
+  <rect x="32" y="106" width="102" height="42" rx="6" fill="#2c2c2e"/>
+  <text x="42" y="122" fill="#8e8e93" font-size="9">Candidates</text><text x="42" y="139" fill="#f2f2f7" font-size="14" font-weight="600">8</text>
+  <rect x="146" y="106" width="104" height="42" rx="6" fill="#2c2c2e"/>
+  <text x="156" y="122" fill="#8e8e93" font-size="9">Available Tools</text><text x="156" y="139" fill="#f2f2f7" font-size="14" font-weight="600">4</text>
+
+  <text x="32" y="176" fill="#f2f2f7" font-size="12" font-weight="600">Ranking</text>
+  <text x="32" y="194" fill="#8e8e93" font-size="10">Max candidates</text><text x="240" y="194" fill="#c7c7cc" font-size="10" text-anchor="end">8</text>
+  <text x="32" y="212" fill="#8e8e93" font-size="10">Novelty</text><text x="240" y="212" fill="#c7c7cc" font-size="10" text-anchor="end">0.54</text>
+  <rect x="32" y="218" width="208" height="4" rx="2" fill="#3a3a3c"/><circle cx="144" cy="220" r="6" fill="#c7c7cc"/>
+  <text x="32" y="240" fill="#8e8e93" font-size="10">Confidence</text><text x="240" y="240" fill="#c7c7cc" font-size="10" text-anchor="end">0.28</text>
+  <rect x="32" y="246" width="208" height="4" rx="2" fill="#3a3a3c"/><circle cx="90" cy="248" r="6" fill="#c7c7cc"/>
+  <text x="32" y="268" fill="#8e8e93" font-size="10">Compute value</text><text x="240" y="268" fill="#c7c7cc" font-size="10" text-anchor="end">0.18</text>
+  <rect x="32" y="274" width="208" height="4" rx="2" fill="#3a3a3c"/><circle cx="70" cy="276" r="6" fill="#c7c7cc"/>
+
+  <text x="32" y="304" fill="#f2f2f7" font-size="12" font-weight="600">Optional Evidence</text>
+  <text x="32" y="320" fill="#8e8e93" font-size="9">Advisory only. Neither changes a score.</text>
+  <rect x="32" y="330" width="11" height="11" rx="3" fill="#0a84ff"/><text x="50" y="340" fill="#c7c7cc" font-size="10">Pfam domains (hmmscan)</text>
+  <rect x="32" y="350" width="11" height="11" rx="3" fill="none" stroke="#5a5a5e"/><text x="50" y="360" fill="#c7c7cc" font-size="10">Local LLM summary (ollama)</text>
+
+  <text x="32" y="388" fill="#f2f2f7" font-size="12" font-weight="600">Tool Readiness</text>
+  <circle cx="37" cy="402" r="4" fill="#30d158"/><text x="50" y="406" fill="#c7c7cc" font-size="10">MMseqs2</text>
+  <circle cx="37" cy="420" r="4" fill="#30d158"/><text x="50" y="424" fill="#c7c7cc" font-size="10">HMMER (hmmscan)</text>
+  <circle cx="37" cy="438" r="4" fill="#ff9f0a"/><text x="50" y="442" fill="#c7c7cc" font-size="10">Foldseek — not installed</text>
+
+  <!-- middle pane -->
+  <rect x="278" y="50" width="250" height="404" rx="8" fill="#242426" stroke="#3a3a3c"/>
+  <text x="294" y="72" fill="#8e8e93" font-size="11" font-weight="600">Prospects</text>
+  <rect x="290" y="84" width="226" height="52" rx="6" fill="#0a5fd6"/>
+  <text x="302" y="102" fill="#ffffff" font-size="11" font-weight="600">#1  soil_bin_0421</text>
+  <text x="302" y="117" fill="#dce8fb" font-size="9">Metalloenzyme-like orphan</text>
+  <rect x="302" y="124" width="60" height="3" rx="1.5" fill="#ffffff"/><rect x="370" y="124" width="52" height="3" rx="1.5" fill="#cfe0fb"/><rect x="430" y="124" width="28" height="3" rx="1.5" fill="#cfe0fb"/>
+  <g fill="#242426">
+    <rect x="290" y="146" width="226" height="52" rx="6" fill="#2c2c2e"/>
+    <rect x="290" y="208" width="226" height="52" rx="6" fill="#2c2c2e"/>
+    <rect x="290" y="270" width="226" height="52" rx="6" fill="#2c2c2e"/>
+    <rect x="290" y="332" width="226" height="52" rx="6" fill="#2c2c2e"/>
+    <rect x="290" y="394" width="226" height="52" rx="6" fill="#2c2c2e"/>
+  </g>
+  <text x="302" y="164" fill="#f2f2f7" font-size="11">#2  lichen_bin_0144</text><text x="302" y="179" fill="#8e8e93" font-size="9">Metalloenzyme-like orphan</text>
+  <text x="302" y="226" fill="#f2f2f7" font-size="11">#3  desert_bin_6188</text><text x="302" y="241" fill="#8e8e93" font-size="9">Metalloenzyme-like orphan</text>
+  <text x="302" y="288" fill="#f2f2f7" font-size="11">#4  thermal_bin_0089</text><text x="302" y="303" fill="#8e8e93" font-size="9">Metalloenzyme-like orphan</text>
+  <text x="302" y="350" fill="#f2f2f7" font-size="11">#5  marine_bin_1177</text><text x="302" y="365" fill="#8e8e93" font-size="9">Membrane-associated unknown</text>
+  <text x="302" y="412" fill="#f2f2f7" font-size="11">#6  compost_bin_3012</text><text x="302" y="427" fill="#8e8e93" font-size="9">Low-complexity interaction candidate</text>
+
+  <!-- right pane -->
+  <rect x="540" y="50" width="344" height="404" rx="8" fill="#242426" stroke="#3a3a3c"/>
+  <text x="558" y="80" fill="#f2f2f7" font-size="17" font-weight="600">soil_bin_0421</text>
+  <text x="558" y="98" fill="#8e8e93" font-size="11">Metalloenzyme-like orphan</text>
+  <rect x="558" y="112" width="100" height="62" rx="6" fill="#2c2c2e"/>
+  <text x="570" y="130" fill="#8e8e93" font-size="9">Novelty</text><text x="570" y="158" fill="#f2f2f7" font-size="24" font-weight="600">92</text>
+  <rect x="668" y="112" width="100" height="62" rx="6" fill="#2c2c2e"/>
+  <text x="680" y="130" fill="#8e8e93" font-size="9">Confidence</text><text x="680" y="158" fill="#f2f2f7" font-size="24" font-weight="600">85</text>
+  <rect x="778" y="112" width="90" height="62" rx="6" fill="#2c2c2e"/>
+  <text x="790" y="130" fill="#8e8e93" font-size="9">Compute Value</text><text x="790" y="158" fill="#f2f2f7" font-size="24" font-weight="600">48</text>
+
+  <text x="558" y="198" fill="#f2f2f7" font-size="12" font-weight="600">Hypothesis</text>
+  <text x="558" y="216" fill="#c7c7cc" font-size="10">Weak known-sequence identity with a Histidine-acid catalytic</text>
+  <text x="558" y="231" fill="#c7c7cc" font-size="10">pattern and a Glycine-rich loop. Worth testing as an</text>
+  <text x="558" y="246" fill="#c7c7cc" font-size="10">unannotated metal-binding or redox enzyme before spending</text>
+  <text x="558" y="261" fill="#c7c7cc" font-size="10">heavier structure-prediction budget.</text>
+
+  <text x="558" y="292" fill="#f2f2f7" font-size="12" font-weight="600">Evidence</text>
+  <rect x="558" y="302" width="310" height="42" rx="6" fill="#2c2c2e"/>
+  <text x="570" y="320" fill="#f2f2f7" font-size="10">Composite novelty</text><text x="856" y="320" fill="#f2f2f7" font-size="10" text-anchor="end">92%</text>
+  <rect x="570" y="330" width="272" height="4" rx="2" fill="#0a84ff"/>
+  <rect x="558" y="352" width="310" height="42" rx="6" fill="#2c2c2e"/>
+  <text x="570" y="370" fill="#f2f2f7" font-size="10">Annotation confidence</text><text x="856" y="370" fill="#f2f2f7" font-size="10" text-anchor="end">12%</text>
+  <rect x="570" y="380" width="36" height="4" rx="2" fill="#0a84ff"/>
+  <rect x="558" y="402" width="310" height="42" rx="6" fill="#2c2c2e"/>
+  <text x="570" y="420" fill="#c7c7cc" font-size="10">Pfam domain Transpeptidase</text><text x="856" y="420" fill="#8e8e93" font-size="9" text-anchor="end">advisory</text>
+  <text x="570" y="434" fill="#8e8e93" font-size="9">PF00905.24 — does not change the ranking scores</text>
+</svg>

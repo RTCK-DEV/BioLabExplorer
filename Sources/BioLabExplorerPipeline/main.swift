@@ -2,7 +2,7 @@ import BioLabExplorerCore
 import Foundation
 
 let usage = """
-BioLabExplorerPipeline — rank protein candidates from a FASTA file.
+BioLabExplorerPipeline \(BioLabExplorerVersion.current) — rank protein candidates from a FASTA file.
 
 USAGE:
   BioLabExplorerPipeline --input <query.fasta> [options]
@@ -26,6 +26,7 @@ OPTIONAL EVIDENCE (never changes a score):
   --summarize [model]     Advisory local-LLM wording via ollama (default model: \(LocalSummaryAdapter.defaultModel)).
 
   -h, --help              Show this help.
+  --version               Print the version and exit.
 
 Missing external tools are reported, never silently ignored. Every default
 path runs offline against local files only.
@@ -117,6 +118,9 @@ func parseArguments(_ raw: [String]) throws -> PipelineArguments {
             }
         case "-h", "--help":
             print(usage)
+            exit(0)
+        case "--version":
+            print(BioLabExplorerVersion.detail)
             exit(0)
         default:
             throw PipelineCLIError.unknownFlag(flag)

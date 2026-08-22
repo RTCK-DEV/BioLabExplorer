@@ -30,8 +30,11 @@ assert cfg.get("openmmPrecision") in ("single", "mixed", "double"), "invalid Ope
 # The resolved config is what every backend actually consumes; it must be valid
 # on THIS host, whatever the checked-in file says.
 resolved, notes = host_profile.resolve_config(cfg, path=os.path.join(root, "config"))
-assert resolved["openmmPlatform"] in ("CPU", "CUDA", "OpenCL", "Reference"), \
-    f"invalid resolved OpenMM platform: {resolved['openmmPlatform']}"
+# openmmPlatform is passed through untouched: openmm_relax.py probes the
+# platforms for real and records every attempt, so nothing here should guess.
+assert resolved["openmmPlatform"] == cfg["openmmPlatform"], "openmmPlatform must not be resolved here"
+assert resolved["openmmPlatform"] in ("auto", "CPU", "CUDA", "OpenCL", "Reference"), \
+    f"invalid OpenMM platform: {resolved['openmmPlatform']}"
 assert resolved["esmfoldDevice"] in ("mps", "cpu"), \
     f"invalid resolved ESMFold device: {resolved['esmfoldDevice']}"
 for k in ("maxWorkspaceBytes", "simRamBudgetBytes", "simReserveBytes", "simMaxCpuJobs"):
@@ -42,7 +45,7 @@ assert resolved["simMaxCpuJobs"] >= 0, "resolved simMaxCpuJobs must be non-negat
 assert resolved["maxWorkspaceBytes"] > 0, "resolved workspace cap must be positive"
 # Every substitution must be explainable, not silent.
 resolved_keys = {note["key"] for note in notes}
-auto_keys = {k for k, v in cfg.items() if v == "auto"}
+auto_keys = {k for k, v in cfg.items() if v == "auto"} - {"openmmPlatform"}
 assert resolved_keys == auto_keys, f"unexplained resolution: {resolved_keys ^ auto_keys}"
 
 folding = json.load(open(os.path.join(root, cfg["foldingManifest"])))

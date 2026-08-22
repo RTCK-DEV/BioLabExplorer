@@ -90,24 +90,29 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual(intel_mac["esmfoldDevice"], "cpu")
         self.assertEqual(linux["esmfoldDevice"], "cpu")
 
-    def test_openmm_platform_prefers_cuda_then_falls_back_by_os(self):
-        cuda, _ = hp.resolve_config(AUTO_CFG, host=host(system="Linux", machine="x86_64", nvidia=True))
-        linux, _ = hp.resolve_config(AUTO_CFG, host=host(system="Linux", machine="x86_64"))
-        mac, _ = hp.resolve_config(AUTO_CFG, host=host())
-        self.assertEqual(cuda["openmmPlatform"], "CUDA")
-        self.assertEqual(linux["openmmPlatform"], "OpenCL")
-        self.assertEqual(mac["openmmPlatform"], "CPU")
+    def test_openmm_platform_is_left_for_the_real_probe(self):
+        # openmm_relax.py tries CUDA, then OpenCL, then CPU and records every
+        # attempt. A second guess here would be the one that could be wrong.
+        for description in (host(), host(system="Linux", machine="x86_64", nvidia=True)):
+            resolved, notes = hp.resolve_config(AUTO_CFG, host=description)
+            self.assertEqual(resolved["openmmPlatform"], "auto")
+            self.assertNotIn("openmmPlatform", {n["key"] for n in notes})
+
+    def test_an_explicit_openmm_platform_is_still_passed_through(self):
+        resolved, _ = hp.resolve_config({**AUTO_CFG, "openmmPlatform": "CUDA"}, host=host())
+        self.assertEqual(resolved["openmmPlatform"], "CUDA")
 
     def test_every_auto_key_is_reported_with_a_reason(self):
         resolved, notes = hp.resolve_config(AUTO_CFG, host=host())
-        self.assertEqual({n["key"] for n in notes}, set(AUTO_CFG))
+        self.assertEqual({n["key"] for n in notes}, set(AUTO_CFG) - {"openmmPlatform"})
         for note in notes:
             self.assertTrue(note["reason"].strip(), f"{note['key']} has no reason")
             self.assertNotEqual(resolved[note["key"]], "auto")
 
-    def test_no_auto_value_survives_resolution(self):
+    def test_only_the_probed_key_may_stay_auto(self):
         resolved, _ = hp.resolve_config(AUTO_CFG, host=host())
-        self.assertNotIn("auto", [v for v in resolved.values() if isinstance(v, str)])
+        still_auto = [k for k, v in resolved.items() if v == "auto"]
+        self.assertEqual(still_auto, ["openmmPlatform"])
 
     def test_unknown_keys_pass_through_untouched(self):
         cfg = {**AUTO_CFG, "uniprotHost": "rest.uniprot.org", "enableNetwork": True}
@@ -125,13 +130,14 @@ class DetectionTests(unittest.TestCase):
         if facts["physicalMemoryDetected"]:
             self.assertGreater(facts["physicalMemoryBytes"], 0)
 
-    def test_load_resolved_reads_a_file_and_leaves_no_auto(self):
+    def test_load_resolved_reads_a_file_and_resolves_it(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "worker.json")
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(AUTO_CFG, fh)
             resolved = hp.load_resolved(path)
-            self.assertNotIn("auto", [v for v in resolved.values() if isinstance(v, str)])
+            self.assertIsInstance(resolved["simRamBudgetBytes"], int)
+            self.assertIn(resolved["esmfoldDevice"], ("mps", "cpu"))
 
 
 class CommandLineTests(unittest.TestCase):
@@ -170,6 +176,7 @@ class CommandLineTests(unittest.TestCase):
         resolved = json.loads(result.stdout)
         self.assertIsInstance(resolved["simRamBudgetBytes"], int)
         self.assertIn(resolved["esmfoldDevice"], ("mps", "cpu"))
+        self.assertIn(resolved["openmmPlatform"], ("auto", "CPU", "CUDA", "OpenCL", "Reference"))
 
 
 if __name__ == "__main__":

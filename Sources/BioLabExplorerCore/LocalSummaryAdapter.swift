@@ -71,7 +71,7 @@ public enum LocalSummaryAdapter {
                     isAvailable: false,
                     executablePath: executablePath,
                     installedModels: [],
-                    reason: "`ollama list` failed (exit \(outcome.exitCode)); is the daemon running?"
+                    reason: "The ollama server is not answering. Start it with: ollama serve  (to keep it running: brew services start ollama)"
                 )
             }
             models = parseModelList(outcome.stdout)
@@ -85,11 +85,19 @@ public enum LocalSummaryAdapter {
         }
 
         guard matches(model: model, in: models) else {
+            // Naming what IS installed turns "not installed" into a choice the
+            // reader can act on without going to look it up.
+            let installed = models.isEmpty
+                ? "No models are installed."
+                : "Installed: \(models.joined(separator: ", "))."
+            let alternative = models.first.map {
+                " — or use one you already have: --summarize \($0)"
+            } ?? ""
             return Availability(
                 isAvailable: false,
                 executablePath: executablePath,
                 installedModels: models,
-                reason: "Model \(model) is not installed. Run: ollama pull \(model)"
+                reason: "Model \(model) is not installed. \(installed) Run: ollama pull \(model)\(alternative)"
             )
         }
         return Availability(

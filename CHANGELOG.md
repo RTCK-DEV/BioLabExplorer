@@ -39,6 +39,21 @@ real local model, and the packaged app.
 
 ### Added
 
+- **`scripts/doctor.sh`** — the one command a newcomer runs. Checks macOS,
+  Swift, Python, the bundled data and every optional tool, prints the exact
+  command for anything missing, shows what this machine resolves the config to,
+  and with `--build` builds and runs the bundled 200-sequence example. Offline,
+  installs nothing, never asks for an administrator password. CI runs it, so the
+  first thing anyone does with the project cannot silently break.
+- A README that starts with a picture of the window, three commands, and a
+  plain "is this for you?" table, followed by how to read a result. The
+  reference material still follows; it is no longer the first thing you meet.
+- A **Troubleshooting** section covering the failures people actually hit:
+  missing Swift, the Gatekeeper block on an ad-hoc-signed app, an installed
+  tool reported missing, an unindexed Pfam database, the ollama server not
+  running, a model tag that does not match, tests printing SKIPPED, and what a
+  run with no actionable candidate means.
+- `--version` on the pipeline CLI, from a single `BioLabExplorerVersion`.
 - `Tests/perpetual/test_openmm_determinism.sh`: relaxes the same structure
   twice and requires byte-identical output, requires the metrics to report the
   thread count actually used, and pins the `auto` platform ordering. Skips when
@@ -48,6 +63,18 @@ real local model, and the packaged app.
   the tool search order.
 - CI names the suites that skipped on the runner, so a silent skip is never
   mistaken for a pass.
+
+### Changed
+
+- **One source of truth for the OpenMM platform.** `host_profile.py` used to
+  guess `openmmPlatform` from the host while `openmm_relax.py` probed the
+  platforms for real — two different answers to one question, and the guess was
+  the one that could be wrong. The key is now passed through untouched and the
+  probe decides, recording every attempt.
+- Ollama's unavailable messages name the next command instead of describing the
+  problem: a stopped server says `ollama serve` (and `brew services start
+  ollama`), and a missing model lists the models you do have plus a
+  `--summarize` line that would work with one of them.
 
 ### Verified on real tools
 

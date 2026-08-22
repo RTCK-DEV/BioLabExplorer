@@ -14,6 +14,7 @@ if the code is good.
 ## Setting up
 
 ```sh
+scripts/doctor.sh                    # what this machine has, and what it is missing
 swift build
 swift run BioLabExplorerChecks       # fast Swift checks
 bash Tests/perpetual/run_all.sh      # full offline suite (M1..M5 + adapters)

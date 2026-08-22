@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Report toolchain
         run: |
@@ -25,7 +25,7 @@ jobs:
           sw_vers
 
       - name: Cache SwiftPM build products
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .build
           key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Sources/**/*.swift') }}
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Shell syntax
         run: |

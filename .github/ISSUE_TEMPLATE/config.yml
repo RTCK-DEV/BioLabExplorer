@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security or biosecurity concern
+    url: https://github.com/RTCK-reina/BioLabExplorer/security/advisories/new
+    about: Report privately instead of opening a public issue.

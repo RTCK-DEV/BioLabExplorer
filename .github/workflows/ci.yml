@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build, check and run the offline suite
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report toolchain
+        run: |
+          swift --version
+          python3 --version
+          sw_vers
+
+      - name: Cache SwiftPM build products
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Sources/**/*.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      # HMMER lets the Pfam adapter test build a throwaway profile database and
+      # exercise the real hmmscan chain. Without it that test skips itself.
+      - name: Install HMMER
+        run: brew install hmmer
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Swift checks
+        run: swift run BioLabExplorerChecks
+
+      - name: Build (release)
+        run: swift build -c release
+
+      # Everything below runs offline: no test contacts UniProt, AlphaFold,
+      # Pfam or any model host.
+      - name: Offline test suite (M1..M5 + adapters)
+        run: bash Tests/perpetual/run_all.sh
+
+      - name: Host profile on this runner
+        run: python3 scripts/host_profile.py --config config/worker.json --explain
+
+      - name: Package the app bundle
+        run: scripts/package_app.sh
+
+  static-checks:
+    name: Shell and Python static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: |
+          status=0
+          for script in $(git ls-files '*.sh'); do
+            bash -n "$script" || status=1
+          done
+          exit $status
+
+      - name: ShellCheck
+        # SC1091: sourced files are resolved at runtime, not in CI.
+        run: shellcheck --severity=warning --exclude=SC1091 $(git ls-files '*.sh')
+
+      - name: Python syntax
+        run: python3 -m compileall -q scripts Tests
+
+      - name: Host profile unit tests (non-macOS host)
+        run: python3 Tests/perpetual/test_host_profile.py
+
+      - name: Worker config contract
+        run: bash Tests/perpetual/test_config.sh

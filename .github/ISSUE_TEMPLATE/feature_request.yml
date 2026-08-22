@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a capability or an adapter.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read `CONTRIBUTING.md` first. Proposals that make an external
+        tool mandatory, put a cloud LLM on a default path, let advisory
+        evidence move a score, or weaken the biosecurity manifest will be
+        declined regardless of implementation quality.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can you not do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What would you add, and where does it sit in the pipeline?
+    validations:
+      required: true
+  - type: dropdown
+    id: dependency
+    attributes:
+      label: Does this need a new external tool or database?
+      options:
+        - "No"
+        - "Yes, optional and detected at runtime"
+        - "Yes, and it would be required"
+    validations:
+      required: true
+  - type: textarea
+    id: scores
+    attributes:
+      label: Effect on scoring
+      description: >
+        Does it change noveltyScore, confidenceScore, machineLoadScore,
+        classification, or the validation verdict? If yes, justify it.
+    validations:
+      required: true

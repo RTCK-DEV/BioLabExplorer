@@ -1,89 +1,270 @@
 # BioLabExplorer
 
-BioLabExplorer is a local-first macOS prototype for semi-automated scientific prospecting. The first MVP focuses on protein-sequence discovery: it ranks synthetic environmental protein candidates by novelty, machine-load value, structural-interest proxies, and evidence quality.
+[![CI](https://github.com/RTCK-reina/BioLabExplorer/actions/workflows/ci.yml/badge.svg)](https://github.com/RTCK-reina/BioLabExplorer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform: macOS 15+](https://img.shields.io/badge/platform-macOS%2015%2B-lightgrey)
+![Swift 6](https://img.shields.io/badge/swift-6-orange)
 
-The app does not depend on cloud LLMs. External tools such as MMseqs2, HMMER, Foldseek, and Ollama are optional adapters. If they are missing, the app shows that status and still runs the bundled deterministic sample pipeline.
+A local-first macOS tool for semi-automated scientific prospecting. It reads
+protein FASTA and ranks candidates by novelty, structural interest, evidence
+quality, and how much compute they are worth spending, so a human can decide
+what to look at next.
 
-## Current MVP
+Everything on a default path is deterministic, offline, and local. External
+tools are optional adapters: if MMseqs2, HMMER, Foldseek, OpenMM or Ollama are
+missing, the run says so and continues with the native Swift implementation.
+No cloud LLM is contacted on any code path.
 
-- Native SwiftUI GUI.
-- Deterministic local candidate ranking.
-- Built-in synthetic protein dataset and a cached public-probe workflow.
-- Explicit runtime tool readiness checks.
-- JSON and Markdown report export.
-- Autonomous discovery script that runs checks, candidate discovery, structure validation, achievement reporting, and app packaging.
-- Executable checks for scoring, parsing, report writing, validation, and tool probing.
+## What this is, and what it is not
 
-## Build
+**It is** a prioritisation aid. It answers "of these ten thousand
+uncharacterized proteins, which twenty are worth a human afternoon?"
+
+**It is not** a function predictor. A high novelty score means "weakly annotated
+and distant from anything in the reference set", not "does something
+interesting". `realizedComputeValue` measures how complete the evidence chain
+is, not how confident the biology is. Optional Pfam domains and optional local
+LLM wording are advisory: neither can move a score, a classification, or the
+validation verdict, and the tests enforce that.
+
+## Quickstart
 
 ```sh
+git clone https://github.com/RTCK-reina/BioLabExplorer.git
+cd BioLabExplorer
 swift build
+swift run BioLabExplorerChecks                 # ~15 s, no external tools needed
+
+# Rank the bundled 200-sequence UniProt query set against the curated reference
+swift run BioLabExplorerPipeline \
+  --input data/public_probe/unreviewed_uncharacterized_bacteria_200.fasta \
+  --reference data/curated_reference/pbp_pks_reference.fasta \
+  --output runs/quickstart --max 20
+
+open runs/quickstart/discovery-report.md
 ```
 
-## Run
+That runs entirely from files in the repository. Nothing is downloaded and no
+external tool is required.
+
+For the GUI:
 
 ```sh
 swift run BioLabExplorer
 ```
 
-## Test
+## Requirements
 
-```sh
-swift run BioLabExplorerChecks
+- macOS 15 or later, Apple Silicon or Intel.
+- Swift 6 (Xcode 16 or the matching Command Line Tools).
+- Python 3.9+ for the worker scripts and the test suite (macOS ships this).
+
+Everything else is optional and detected at runtime:
+
+| Tool | Enables | Install |
+| --- | --- | --- |
+| HMMER | Pfam domain evidence (`--pfam`), `phmmer` in the sim queue | `brew install hmmer` |
+| MMseqs2 | faster reference search (`--use-mmseqs`) | `brew install mmseqs2` |
+| Foldseek | structure comparison | `scripts/setup_simulation_stack.sh` |
+| OpenMM, PDBFixer, Vina, Meeko | the M5 structure chain | `scripts/setup_simulation_stack.sh` |
+| Ollama | advisory local summaries (`--summarize`) | https://ollama.com |
+
+## Command line
+
+```
+BioLabExplorerPipeline --input <query.fasta> [options]
+
+REQUIRED
+  --input <path>          Protein FASTA to rank.
+
+OUTPUT
+  --output <dir>          Run directory for reports (default: runs/latest).
+  --max <n>               Maximum ranked candidates (default: 20).
+  --require-discovery     Exit 2 when no candidate meets the actionable threshold.
+
+REFERENCE SEARCH
+  --reference <path>      Reference FASTA for known-hit identity.
+  --use-mmseqs            Prefer MMseqs2 over the native Swift k-mer search.
+
+OPTIONAL EVIDENCE (never changes a score)
+  --pfam                  Annotate candidates with Pfam domains via hmmscan.
+  --pfam-db <path>        Pfam-A.hmm location (else $BIOLAB_PFAM_DB, else data/pfam/Pfam-A.hmm).
+  --pfam-evalue <x>       Use an E-value cutoff instead of Pfam gathering thresholds.
+  --summarize [model]     Advisory local-LLM wording via ollama (default: llama3.2).
 ```
 
-## Run the Autonomous Discovery Workflow
+Unknown options are rejected rather than ignored, so a typo cannot quietly
+produce a run with the wrong settings.
 
-This is the main end-to-end workflow. It runs local checks, analyzes the cached 200-sequence UniProt unreviewed/uncharacterized bacterial query set, validates the top actionable candidate with Swift-native C-alpha distance-map comparison, writes an achievement report, and packages the macOS app.
+### Input validation
 
-By default it uses only local files and the local AlphaFold cache. If the public probe FASTA or AlphaFold structures are missing, it fails with the missing path instead of silently downloading data.
+The parser is strict about what it accepts, and explicit about what it changes:
+
+- Alignment gaps (`-`, `.`, `~`) are removed, counted, and reported.
+- A single trailing `*` is trimmed and reported. An **internal** stop codon fails
+  with the residue position — that translation is wrong.
+- IUPAC ambiguity codes (`B Z J X O U`) are accepted; anything else fails with
+  the offending character and its position.
+- Whitespace and residue numbering are ignored; `;` comment lines are skipped.
+- Nucleotide FASTA is **rejected**, not ranked as protein.
+- Duplicate record identifiers are kept as separate candidates, and reported.
+
+Every transformation appears in the run notes and in `discovery-report.md`.
+
+## The app
+
+`swift run BioLabExplorer` opens a three-pane window: run settings and tool
+readiness on the left, ranked candidates in the middle, and the evidence for the
+selected candidate on the right.
+
+- **Import FASTA** runs your file through exactly the command-line pipeline, so
+  the app and the CLI cannot drift apart. **Bundled Sample** returns to the
+  built-in synthetic dataset.
+- **Ranking** exposes the candidate cap and the novelty / confidence /
+  compute-value biases, and lets you point a reference FASTA at an imported file.
+- **Optional Evidence** toggles Pfam domains and the local summary, and tells you
+  *before* you run whether each one can actually work ("hmmscan and Pfam-A.hmm
+  are ready", "Model llama3.2 is not installed. Run: ollama pull llama3.2").
+- **Export** writes JSON and Markdown to `~/Documents/BioLabExplorer/Runs`;
+  **Reveal** opens it in Finder.
+
+Long work — reference search, hmmscan, a local model — runs off the main thread,
+so the window stays responsive.
+
+## Optional evidence
+
+### Pfam domains
 
 ```sh
-scripts/run_autonomous_discovery.sh
+brew install hmmer
+ALLOW_NETWORK=1 scripts/setup_pfam.sh          # ~400 MB download, ~3 GB on disk
+scripts/setup_pfam.sh --plan                   # review it first, offline
+
+swift run BioLabExplorerPipeline --input query.fasta --output runs/demo --pfam
 ```
 
-To explicitly allow public UniProt/AlphaFold reads for missing cache files:
+`setup_pfam.sh` refuses without `ALLOW_NETWORK=1`, pins the host, verifies the
+archive against the checksum file EBI publishes beside it (or a `PFAM_SHA256`
+you supply), runs `hmmpress`, and writes `data/pfam/pfam_manifest.json` recording
+the release and digests it actually obtained. Pin a release for a reproducible
+install: `PFAM_RELEASE=Pfam37.0`.
+
+Domain hits land in the `domains` field, in a Markdown table marked *advisory,
+not scored*, and as zero-weighted evidence entries. Default thresholds are
+Pfam's curated per-family gathering cutoffs (`--cut_ga`), which is what the Pfam
+website itself uses.
+
+If HMMER is missing, the database is absent, or it has not been `hmmpress`-ed,
+the run completes and the report says which one and how to fix it.
+
+### Advisory local summaries
 
 ```sh
-scripts/run_autonomous_discovery.sh --allow-network
+ollama pull llama3.2
+swift run BioLabExplorerPipeline --input query.fasta --output runs/demo --summarize
 ```
 
-## Run the Public Discovery Probe
+The prompt is built only from values already in the deterministic report and
+instructs the model to restate them without adding biology. The result is stored
+as `advisorySummary` with a disclaimer attached, rendered under a heading that
+says *not evidence*, and excluded from every score and from `DiscoveryValidator`.
 
-This uses a 200-sequence UniProt unreviewed/uncharacterized bacterial query set and the local curated reference FASTA in `data/curated_reference/pbp_pks_reference.fasta`. The default path uses Swift-native k-mer search, writes JSON/Markdown reports, and fails if no actionable discovery candidate is found.
+## Configuration and host detection
+
+`config/worker.json` is portable. Hardware-dependent keys may be the string
+`"auto"`, resolved from the running host at use time:
+
+| Key | Auto rule |
+| --- | --- |
+| `simReserveBytes` | one third of physical RAM, at least 4 GiB |
+| `simRamBudgetBytes` | physical RAM minus the reserve |
+| `maxWorkspaceBytes` | one quarter of free disk, clamped to 5–20 GiB |
+| `simMaxCpuJobs` | `0`, meaning every logical CPU may take a job |
+| `esmfoldDevice` | `mps` on Apple Silicon, `cpu` elsewhere |
+| `openmmPlatform` | `CUDA` with an NVIDIA GPU, `CPU` on macOS, `OpenCL` otherwise |
+
+See what your machine resolves to:
 
 ```sh
-scripts/run_public_probe.sh
+python3 scripts/host_profile.py --config config/worker.json --explain
 ```
-
-After a public probe run, validate the top actionable candidate at the structure level with Swift-native C-alpha distance-map comparison and the local AlphaFold cache:
-
-```sh
-swift run BioLabExplorerStructureCheck --run runs/public_probe_20260708_validated --cache data/alphafold_cache
-```
-
-Latest verified autonomous output in this workspace:
 
 ```text
-runs/autonomous_discovery_20260708_gui_bundle/automation-achievement.md
-runs/autonomous_discovery_20260708_gui_bundle/discovery-report.md
-runs/autonomous_discovery_20260708_gui_bundle/discovery-validation.json
-runs/autonomous_discovery_20260708_gui_bundle/native_structure_summary.md
+host: Darwin arm64, 15 logical CPUs, RAM 24.00 GiB
+  simReserveBytes = 8.00 GiB  (one third of physical RAM, at least 4 GiB, ...)
+  simRamBudgetBytes = 16.00 GiB  (physical RAM minus the reserve)
+  ...
 ```
 
-## Package a Local App Bundle
+An explicit value is never overridden, so pinning a key for a benchmark still
+works. Detection failures fall back to conservative constants rather than
+raising. Each run records the host and the resolutions it used in
+`runs/<cycle>/sim/summary.json`.
+
+## Reproducibility
+
+The ranking is bit-for-bit identical across separate processes, and
+`Tests/perpetual/test_determinism.sh` enforces it by comparing six independent
+runs — not six iterations inside one process, which cannot see the failure mode.
+
+This matters because Swift seeds its hashing per process. Any floating-point
+value accumulated by iterating a `Dictionary` or `Set` sums its terms in a
+different order every run, and floating-point addition is not associative.
+`shannonEntropy` did exactly that and drifted by one ULP, which propagated into
+`confidenceScore`. Sort before you sum.
+
+OpenMM runs single-threaded (`openmmCpuThreads: 1`) and Vina uses a fixed seed,
+for the same reason: two runs of the same input should produce byte-identical
+structures.
+
+## Reports
+
+Every run directory gets:
+
+| File | Contents |
+| --- | --- |
+| `discovery-report.md` | Human-readable ranking, evidence, tool status, run notes |
+| `run-<timestamp>.json` | The full `DiscoveryRun`: candidates, features, evidence, domains, advisory summary |
+| `discovery-validation.json` | Whether any candidate met the actionable threshold, and the criteria |
+
+A candidate is *actionable* when it is weakly annotated, classified as a remote
+functional candidate, scores at least 0.85 novelty and 0.65 confidence, sits
+between 0.15 and 0.40 known-hit identity, has a best-hit annotation, and carries
+search evidence (e-value ≤ 1e-20 or native k-mer support ≥ 0.035). The full
+criteria list ships inside every validation file, so a verdict is never a black
+box.
+
+`domains` and `advisorySummary` decode as absent, so reports written before
+those fields existed still load.
+
+## Autonomous discovery workflow
+
+Runs local checks, analyses the cached 200-sequence UniProt query set, validates
+the top candidate with Swift-native C-alpha distance-map comparison, writes an
+achievement report, and packages the app.
 
 ```sh
-scripts/package_app.sh
+scripts/run_autonomous_discovery.sh                 # local files and cache only
+scripts/run_autonomous_discovery.sh --allow-network # permit UniProt/AlphaFold reads
 ```
 
-The generated app bundle is written to `dist/BioLab Explorer.app`.
+By default it fails with the missing path rather than silently downloading data.
 
-## Perpetual Discovery Worker (M1, offline)
+```sh
+scripts/run_public_probe.sh          # public probe against the curated reference
+scripts/package_app.sh               # writes dist/BioLab Explorer.app
+```
 
-Consumes FASTA batches in `state/inbox/` and records every processed sequence into a
-local SQLite seen-set ledger (`discoveries/ledger.db`), flagging actionable ones and
-regenerating `discoveries/DISCOVERIES.md` from it. Offline only; local-only outputs.
+## Perpetual discovery worker
+
+A five-milestone pipeline that keeps finding new candidates without supervision.
+Each milestone is independently usable.
+
+### M1 — offline worker
+
+Consumes FASTA batches from `state/inbox/`, records every processed sequence in
+a SQLite seen-set ledger (`discoveries/ledger.db`), flags actionable ones, and
+regenerates `discoveries/DISCOVERIES.md`.
 
 ```sh
 swift build -c release
@@ -92,101 +273,200 @@ scripts/run_discovery_cycle.sh
 scripts/discovery_status.sh
 ```
 
-Guardrails: `state/STOP` stops gracefully; the cycle pauses under `diskFloorGB`/`maxWorkspaceBytes`
-(config/worker.json) and aborts if the reference digest ≠ `config/approved_manifest.json`.
-A single-instance lock (`state/.lock`) prevents overlap. Tests: `bash Tests/perpetual/run_all.sh`.
+Guardrails: `state/STOP` stops gracefully; the cycle pauses under `diskFloorGB`
+or `maxWorkspaceBytes` and aborts if the reference digest does not match
+`config/approved_manifest.json`; a single-instance lock (`state/.lock`) prevents
+overlap.
 
-## Perpetual Discovery Worker (M2, daemon)
+### M2 — daemon
 
-Run the offline cycle continuously via launchd (back-to-back, min spacing
-`throttleSeconds`). Falls back to the same guardrails; N consecutive failures
-(`maxConsecutiveFailures`) trip a circuit breaker (`state/PAUSED`).
+Runs cycles back to back under launchd with a minimum spacing of
+`throttleSeconds`. After `maxConsecutiveFailures` failures a circuit breaker
+trips (`state/PAUSED`).
 
 ```sh
-swift build -c release
 scripts/discovery_agent.sh install     # load the launchd agent
-scripts/discovery_agent.sh status      # loaded? paused? + discovery status
-scripts/discovery_agent.sh resume      # clear PAUSED + failure streak
-scripts/discovery_agent.sh uninstall   # true stop (unload + remove)
+scripts/discovery_agent.sh status      # loaded? paused? plus discovery status
+scripts/discovery_agent.sh resume      # clear PAUSED and the failure streak
+scripts/discovery_agent.sh uninstall   # true stop (unload and remove)
 ```
 
-`state/STOP` pauses cycles without unloading; true stop is `uninstall`.
+`state/STOP` pauses cycles without unloading; a true stop is `uninstall`.
 
-## Perpetual Discovery Worker (M3, network rotation — opt-in)
+### M3 — network rotation (opt-in)
 
-To keep finding NEW candidates, enable UniProt fetching (cursor-paged, one page/cycle):
+To keep finding *new* candidates, enable cursor-paged UniProt fetching, one page
+per cycle:
 
 1. Set `enableNetwork: true` in `config/worker.json`.
-2. Ensure `config/approved_manifest.json` matches BOTH the curated reference AND
-   `config/query_rotation.json` (digests).
-3. Install the daemon: `scripts/discovery_agent.sh install`.
+2. Ensure `config/approved_manifest.json` matches both the curated reference and
+   `config/query_rotation.json` by digest, names a non-`unset` reviewer and
+   review date, and retains the biosecurity exclusions.
+3. `scripts/discovery_agent.sh install` — it prints `mode=NETWORKED` and bakes
+   `ALLOW_NETWORK=1` into the generated launchd plist. With `enableNetwork:
+   false` it prints `mode=offline` and never sets the variable.
+
+One networked cycle by hand, without installing the daemon:
 
 ```sh
-scripts/discovery_agent.sh install
+scripts/run_discovery_cycle.sh --allow-network
 ```
 
-Because `enableNetwork` is true, `install` bakes `ALLOW_NETWORK=1` into the generated launchd
-plist's `EnvironmentVariables`, so the installed daemon fetches a page whenever the inbox is
-empty each cycle — `install` prints `mode=NETWORKED` to confirm. Leave `enableNetwork: false`
-for an offline daemon (`install` prints `mode=offline`); its plist never sets `ALLOW_NETWORK`.
+Envelope: never touches the network unless `ALLOW_NETWORK=1` **and** the host is
+`uniprotHost`; rate limited; fail-closed when the manifest is absent or a digest
+does not match. Every opaque next-page cursor is bound to that digest and query
+ID, so legacy or mismatched cursors are discarded. Transport, 429 and 5xx errors
+are retryable no-ops; scope or response-contract violations fail the cycle
+loudly.
 
-Manual alternative — run a single networked cycle by hand, without installing the daemon:
+### M4 — dashboard
 
-```sh
-ALLOW_NETWORK=1 scripts/run_discovery_cycle.sh    # one networked cycle (manual, one-shot)
-```
-
-Envelope: never hits the network unless `ALLOW_NETWORK=1` AND the host is `uniprotHost`;
-rate-limited; fail-closed if the manifest is absent or the reference/query digests don't match.
-The approved query set lives in `config/query_rotation.json` — editing it requires re-approving
-the manifest digest (biosecurity scope control).
-
-## Perpetual Discovery Worker (M4, dashboard)
-
-Every cycle regenerates a self-contained `discoveries/dashboard.html` (open it in a
-browser): stat tiles, new-candidates-per-cycle chart, discoveries table, and an
-interactive **3D protein viewer coloured by pLDDT** for candidates with an AlphaFold
-structure. The 3D viewer needs a locally-vendored 3Dmol.js (CDN is not used at runtime):
+Every cycle regenerates a self-contained `discoveries/dashboard.html`: stat
+tiles, a new-candidates-per-cycle chart, the discoveries table, and an
+interactive 3D protein viewer coloured by pLDDT for candidates with an AlphaFold
+structure.
 
 ```sh
-ALLOW_NETWORK=1 scripts/vendor_assets.sh    # one-time: download 3Dmol.js + refresh dashboard.html
+ALLOW_NETWORK=1 scripts/vendor_assets.sh    # one-time: fetch 3Dmol.js, refresh the page
 open discoveries/dashboard.html
 ```
 
-`vendor_assets.sh` regenerates `discoveries/dashboard.html` itself right after a successful
-download, so the 3D viewer appears immediately — no need to wait for the next cycle. Without
-the vendored asset the charts/table still render; the 3D section shows a note. The script
-downloads atomically (via a `.tmp` file) and prints the sha256 of what it fetched; set
-`THREEDMOL_SHA256=<hash>` to pin and verify it on future runs.
+The vendored 3Dmol.js 2.4.0 keeps runtime CDN-free. The vendor script enforces
+HTTPS, rejects redirects, and verifies pinned SHA-256 values for both the script
+and its licence; a custom URL requires an explicit hash pin.
 
-## Perpetual Discovery Worker (M5, simulation stack — opt-in)
+### M5 — simulation stack (opt-in)
 
-Each cycle can run a simulation queue over the cycle's NEW actionable candidates.
-Backends are detected at runtime; anything missing is reported in
-`runs/<cycle>/sim/summary.json` and skipped — the cycle never fails over simulation.
-Admission is bounded by a RAM budget (`simRamBudgetBytes` minus `simReserveBytes`),
-GPU work is serialised, and folding skips sequences longer than `simMaxSeqLength`.
+Each cycle can run a simulation queue over that cycle's new actionable
+candidates. Backends are detected at runtime; anything missing is reported in
+`runs/<cycle>/sim/summary.json`, shown on the dashboard, and skipped. A
+scientific backend failing does not discard the deterministic Swift result;
+queue, payload or reporting contract failures do fail the cycle loudly, before
+input archival.
 
-```sh
-scripts/setup_simulation_stack.sh --plan        # review what it installs (offline)
-ALLOW_NETWORK=1 scripts/setup_simulation_stack.sh   # multi-GB install (your call)
-# then set enableSimulation: true in config/worker.json (and SIM_BIN_DIR if using a conda env)
+Structure computation is a provenance-preserving serial chain:
+
+```text
+sequence -> revision-pinned ESMFold (or labelled AlphaFold-cache fallback)
+         -> PDBFixer heavy-atom repair -> OpenMM minimization
+         -> Meeko receptor preparation -> manifest-gated AutoDock Vina
+         -> local 3Dmol protein/pose viewer + PNG export
 ```
 
-Available today without any install: mmseqs2, HMMER, bundled Foldseek.
-ColabFold is NOT part of the stack (needs ~940GB DB / ~128GB RAM locally). The
-**External MSA Store** (`externalMsaStorePath` + `enableColabFold` in `config/worker.json`)
-is **not yet implemented** — these config keys are currently inert (present as
-placeholders and accepted by config validation, but no code path reads or acts on them
-yet; see the design spec's M5 optional-extension note). The intended design, once built,
-is: mount a store of precomputed a3m and set both keys — folding would then use those
-MSAs only, and the public MSA server would never be contacted.
+OpenMM output is the only receptor source Vina accepts. SHA-256 is recorded at
+every handoff, alongside model revision, energy change, and docking
+box/motif/seed/affinities. Admission is bounded by unified-memory and live
+memory-pressure gates; MMseqs2 and HMMER split available CPU threads by
+configurable weights and run concurrently; GPU work is serialised; folding skips
+sequences longer than `simMaxSeqLength`.
 
-## Next Integration Points
+```sh
+scripts/setup_simulation_stack.sh --plan          # review what it installs, offline
+ALLOW_NETWORK=1 scripts/setup_simulation_stack.sh # multi-GB install, your call
+scripts/setup_esmfold_hf.sh --plan
+ALLOW_NETWORK=1 scripts/setup_esmfold_hf.sh       # isolated PyTorch/Transformers env
+```
 
-- Add FASTA import.
-- Improve the native reference database builder and GUI controls.
-- Keep MMseqs2/Foldseek as optional acceleration/comparison adapters only.
-- Add HMMER/Pfam domain adapter.
-- Add LocalColabFold/Boltz job queue.
-- Add optional local LLM report summarization through Ollama or llama.cpp.
+Set `ESMFOLD_PYTHON` to that environment's Python and `SIM_BIN_DIR` to the
+simulation environment when the tools live in a separate conda env.
+
+The queue can also consume a FASTA directly, using the same accession parser and
+sequence checksum contract as the ledger:
+
+```sh
+python3 scripts/sim_queue.py run \
+  --candidates-fasta data/public_probe/unreviewed_uncharacterized_bacteria_200.fasta \
+  --reference data/public_probe/uniprot_sprot.fasta \
+  --run-dir runs/swissprot-audit --config config/worker.json --budget-seconds 600
+```
+
+ColabFold is **not** part of the stack: local MSA needs roughly 940 GB of
+database and 128 GB of RAM. The External MSA Store (`externalMsaStorePath`,
+`enableColabFold`) is a reserved post-M5 design and is intentionally inert until
+a fully local model/MSA cache path receives its own safety review.
+
+## Measured on the reference host
+
+Recorded on a 15-logical-core / 24 GiB Apple Silicon machine, 2026-07-15. These
+are the author's numbers, not a claim about your hardware.
+
+**CPU splitting** — 200 approved query sequences against the cached 275 MB
+Swiss-Prot FASTA:
+
+| Split | Wall clock | Notes |
+| --- | --- | --- |
+| Equal 7/7 | 508.235 s | |
+| Weighted MMseqs2/HMMER 5/10 | 432.322 s | 75.913 s saved, 1.176× |
+
+Both runs: 40,323 MMseqs2 rows, 98,631 non-comment HMMER result rows, zero
+failed jobs, about 14.3 of 15 cores busy during the concurrent phase. The sorted
+scientific-result SHA-256 values match between runs; only command headers and
+output ordering differ.
+
+**Structure chain** — the 668-residue candidate `A0A062TNK1` through
+ESMFold → OpenMM → Vina: 655.97 s, zero failures, 5.16 GB peak RSS, zero swap.
+ESMFold took 596.72 s on MPS (mean pLDDT 94.59); OpenMM reduced potential energy
+by 55,690.39 kJ/mol; Vina used 15 threads and reported a fixed-seed best pose of
+−8.317 kcal/mol. Folding, relaxation and docking input digests all matched.
+
+**Reproducibility** — a 40-residue fixture produced byte-identical ESMFold PDBs
+across two MPS runs. For `G6AGY4` (842 residues), two OpenMM → Vina runs produced
+byte-identical relaxed PDB, receptor PDBQT and pose PDBQT, with a fixed-seed best
+affinity of −7.941 kcal/mol. OpenCL context creation failed on this host, so the
+recorded release path is the CPU fallback — which is why `openmmPlatform: "auto"`
+resolves to `CPU` on macOS.
+
+## Development
+
+```sh
+swift build                          # debug
+swift run BioLabExplorerChecks       # Swift checks (fast, no external tools)
+swift build -c release               # needed by the integration tests
+bash Tests/perpetual/run_all.sh      # full offline suite, M1..M5 and the adapters
+```
+
+The whole suite is offline. Tests that need something you may not have — the
+release binary, HMMER — skip themselves with a printed reason rather than
+failing. CI installs HMMER and builds release so nothing skips there.
+
+`AGENTS.md` records the project's non-negotiable rules and is worth reading
+before changing anything. `CONTRIBUTING.md` covers what gets a change rejected.
+
+Note: with only the Command Line Tools installed, `swift build` emits
+`ld: warning: search path ... not found` for Xcode-only framework paths, and
+XCTest plugins do not resolve — which is why validation runs through the
+`BioLabExplorerChecks` executable target rather than XCTest.
+
+## Responsible use
+
+Networked candidate fetching is gated by `config/approved_manifest.json`, which
+pins the reference and query-set digests, names a human reviewer, and carries a
+non-empty exclusion list (virulence factors, toxin biosynthesis gene clusters,
+select-agent homologs). Changing the reference or the query scope changes a
+digest and fails the cycle until a human re-approves it.
+
+If you fork this and change that scope, you are the reviewer. Read
+`SECURITY.md` before you do.
+
+## Roadmap
+
+- Streaming FASTA import for inputs larger than memory.
+- A native reference database builder with incremental updates, replacing the
+  one-shot subset build.
+- Pfam clan-aware domain grouping, so overlapping hits from one clan collapse to
+  a single line of evidence.
+- Evaluate Boltz as a manifest-pinned predictor alongside ESMFold.
+- Foldseek structure-database search as an optional comparison adapter.
+
+Not planned: making any external tool mandatory, putting a cloud LLM on a
+default path, or letting advisory evidence influence a score.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 RTCK.
+
+Third-party components and data sources are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). No bulk biological database is
+redistributed here; a few small UniProt, AlphaFold and PubChem records are
+checked in so the quickstart and the tests work offline, under their upstream
+CC BY 4.0 / public-domain terms.

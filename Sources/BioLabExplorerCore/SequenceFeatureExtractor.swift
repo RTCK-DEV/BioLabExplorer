@@ -52,10 +52,18 @@ public enum SequenceFeatureExtractor {
     private static func shannonEntropy(_ residues: [Character]) -> Double {
         let counts = Dictionary(grouping: residues, by: { $0 }).mapValues(\.count)
         let total = Double(residues.count)
-        let entropy = counts.values.reduce(0.0) { partial, count in
-            let probability = Double(count) / total
-            return partial - probability * log2(probability)
-        }
+        // Sum in residue order, not Dictionary order. Swift seeds its hashing
+        // per process, so iterating `counts.values` visits the same terms in a
+        // different order in every run; floating-point addition is not
+        // associative, and the result wobbled by one ULP between processes.
+        // That single bit propagated into confidenceScore and broke the
+        // bit-for-bit reproducibility this project depends on.
+        let entropy = counts
+            .sorted { $0.key < $1.key }
+            .reduce(0.0) { partial, entry in
+                let probability = Double(entry.value) / total
+                return partial - probability * log2(probability)
+            }
         return min(entropy / log2(20.0), 1.0)
     }
 

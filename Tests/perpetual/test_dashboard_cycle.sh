@@ -29,4 +29,12 @@ set +e; DISCOVERIES_DIR="$S/discoveries" bash "$VEND" >/dev/null 2>&1; rc=$?; se
 [[ "$rc" -ne 0 ]] || { echo "FAIL: vendor should refuse without ALLOW_NETWORK"; exit 1; }
 [[ ! -f "$S/discoveries/assets/3Dmol-min.js" ]] || { echo "FAIL: vendor fetched without opt-in"; exit 1; }
 
+# A custom supply-chain source must be content-pinned before any download.
+set +e
+ALLOW_NETWORK=1 THREEDMOL_URL="https://cdnjs.cloudflare.com/custom/3Dmol.js" \
+  DISCOVERIES_DIR="$S/discoveries" bash "$VEND" >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -ne 0 ]] || { echo "FAIL: unpinned custom 3Dmol URL was accepted"; exit 1; }
+
 echo "dashboard cycle tests OK"

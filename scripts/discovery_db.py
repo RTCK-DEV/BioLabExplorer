@@ -12,16 +12,18 @@ import glob
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def seq_sha256(seq):
-    return hashlib.sha256(seq.strip().upper().encode("utf-8")).hexdigest()
+    canonical = re.sub(r"\s+", "", seq).upper()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _utc_now():
@@ -37,6 +39,7 @@ def connect(db_path):
         """CREATE TABLE IF NOT EXISTS processed (
             seq_sha256 TEXT PRIMARY KEY,
             accession TEXT NOT NULL,
+            sequence TEXT,
             verdict TEXT NOT NULL CHECK (verdict IN ('actionable','screened')),
             score REAL,
             classification TEXT,
@@ -46,6 +49,11 @@ def connect(db_path):
             schema_version INTEGER NOT NULL
         )"""
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(processed)")}
+    if "sequence" not in columns:
+        # v1 -> v2 is deliberately additive. Historic rows remain valid for
+        # reporting/dedup; only rows recorded after migration can be simulated.
+        conn.execute("ALTER TABLE processed ADD COLUMN sequence TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_accession ON processed(accession)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_verdict ON processed(verdict)")
     return conn
@@ -114,15 +122,16 @@ def record(input_fasta, run_dir, db_path, discoveries_md, cycle, run_id):
             for acc, seq in parse_fasta(input_fasta):
                 if not seq:
                     continue
-                sha = seq_sha256(seq)
+                canonical_sequence = re.sub(r"\s+", "", seq).upper()
+                sha = seq_sha256(canonical_sequence)
                 is_actionable = acc in qualifying
                 score, classification = scores.get(acc, (None, None))
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO processed"
-                    "(seq_sha256,accession,verdict,score,classification,"
+                    "(seq_sha256,accession,sequence,verdict,score,classification,"
                     "first_seen_cycle,run_id,ts,schema_version)"
-                    " VALUES (?,?,?,?,?,?,?,?,?)",
-                    (sha, acc, "actionable" if is_actionable else "screened",
+                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (sha, acc, canonical_sequence, "actionable" if is_actionable else "screened",
                      score, classification, cycle, run_id, ts, SCHEMA_VERSION),
                 )
                 if cur.rowcount == 1 and is_actionable:
@@ -164,22 +173,23 @@ def regenerate_discoveries_md(db_path, discoveries_md):
 
 
 def export_new_actionable(db_path, cycle, out_path):
-    """Write [{"accession","sequence"}] for rows first recorded actionable THIS cycle.
-
-    Known limitation (deliberate, see brief): the ledger has no sequence column,
-    so sequence is always "" (seq_len 0). This does not gate folding today since
-    no backend is installed by default; a future schema extension can carry the
-    sequence if/when that matters.
-    """
+    """Write complete simulation payloads for actionable rows first seen this cycle."""
     conn = connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT accession FROM processed WHERE verdict='actionable' AND first_seen_cycle=?",
+            "SELECT accession,sequence,seq_sha256,classification,score FROM processed"
+            " WHERE verdict='actionable' AND first_seen_cycle=? ORDER BY accession,seq_sha256",
             (cycle,),
         ).fetchall()
     finally:
         conn.close()
-    candidates = [{"accession": acc, "sequence": ""} for (acc,) in rows]
+    missing = [acc for acc, sequence, _, _, _ in rows if not sequence]
+    _require(not missing, "actionable rows lack sequence payload: " + ", ".join(missing))
+    candidates = [
+        {"accession": acc, "sequence": sequence, "seqSha256": sha,
+         "classification": classification, "score": score}
+        for acc, sequence, sha, classification, score in rows
+    ]
     target_dir = os.path.dirname(out_path) or "."
     os.makedirs(target_dir, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target_dir, suffix=".tmp")

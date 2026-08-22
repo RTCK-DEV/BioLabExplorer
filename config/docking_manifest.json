@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "scopeApproval": "Workspace owner requested a local fold-relax-dock-render pipeline on 2026-07-15.",
+  "ligand": {
+    "id": "pubchem-cid-5904-penicillin-g",
+    "name": "Penicillin G",
+    "sourceUrl": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/5904/SDF?record_type=3d",
+    "sourceSdf": "data/docking/penicillin_g_cid5904.sdf",
+    "canonicalization": "replace PubChem OEChem request-timestamp line 2 with two-space-prefixed BioLabExplorer-PubChem-CID5904-3D",
+    "sourceSha256": "sha256:375f1b21f1399eb5e547ef138a737e78ae2dd5e6b43ce2996ec0614fc2e2f441",
+    "preparedPdbqt": "data/docking/penicillin_g_cid5904.pdbqt",
+    "preparedSha256": "sha256:8bc564042469bb000772570758197ea5510b26eb21b1a9ed42a436dada7d595f"
+  },
+  "allowedClassifications": [
+    "Remote PBP-like cell-wall enzyme candidate"
+  ],
+  "siteSelection": {
+    "method": "first sequence SXXK catalytic-serine anchor mapped to the same PDB residue number",
+    "anchorPattern": "S..K",
+    "anchorResidueOffset": 0,
+    "supportingPatterns": ["KTG", "S.N"],
+    "boxSizeAngstrom": [24.0, 24.0, 24.0]
+  },
+  "vina": {
+    "scoring": "vina",
+    "exhaustiveness": 16,
+    "numModes": 9,
+    "energyRangeKcalPerMol": 3,
+    "seed": 20260715
+  },
+  "interpretation": "Hypothesis-ranking probe only. Affinity is not biological validation; changing ligand or classification scope requires human review."
+}

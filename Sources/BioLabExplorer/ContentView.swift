@@ -17,25 +17,45 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItemGroup {
+                if model.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
                 Button {
                     model.isImportingFASTA = true
                 } label: {
                     Label("Import FASTA", systemImage: "doc.badge.plus")
                 }
+                .disabled(model.isRunning)
+
+                Button {
+                    model.useBundledDataset()
+                } label: {
+                    Label("Bundled Sample", systemImage: "shippingbox")
+                }
+                .disabled(model.isRunning)
 
                 Button {
                     model.runProspecting()
                 } label: {
                     Label("Run", systemImage: "play.fill")
                 }
-                .disabled(model.runState == .running)
+                .disabled(model.isRunning)
 
                 Button {
                     model.exportReport()
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.down")
                 }
-                .disabled(model.currentRun == nil)
+                .disabled(model.currentRun == nil || model.isRunning)
+
+                Button {
+                    model.revealLastExport()
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                }
+                .disabled(model.lastReportPath == nil)
 
                 Button {
                     model.openBundledAchievementReport()
@@ -47,6 +67,7 @@ struct ContentView: View {
         }
         .onAppear {
             model.refreshBundledAchievementReport()
+            model.refreshAdapterAvailability()
             if model.currentRun == nil {
                 model.runProspecting()
             }
@@ -64,6 +85,30 @@ struct ContentView: View {
                 model.reportImportFailure(error)
             }
         }
+        .fileImporter(
+            isPresented: $model.isImportingReference,
+            allowedContentTypes: [.plainText, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                model.setReferenceFASTA(urls.first)
+            case .failure(let error):
+                model.reportImportFailure(error)
+            }
+        }
+        .fileImporter(
+            isPresented: $model.isImportingPfamDatabase,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                model.setPfamDatabase(urls.first)
+            case .failure(let error):
+                model.reportImportFailure(error)
+            }
+        }
     }
 }
 
@@ -71,22 +116,57 @@ private struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        ScrollView {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("BioLab Explorer")
                     .font(.title2.weight(.semibold))
                 Text(statusText)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             MetricStrip(run: model.currentRun)
 
+            if model.settingsAreStale {
+                Label(
+                    "Settings changed since this run. Press Run to apply them.",
+                    systemImage: "arrow.clockwise.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            RankingSettingsSection()
+
+            Divider()
+
+            OptionalEvidenceSection()
+
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Tool Readiness")
-                    .font(.headline)
-                ForEach(model.currentRun?.toolStatuses ?? ToolProbe.defaultProbe().probe()) { status in
+                HStack {
+                    Text("Tool Readiness")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        model.refreshToolStatuses()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Probe the external tools again")
+                }
+                ForEach(model.toolStatuses) { status in
                     ToolStatusRow(status: status)
                 }
             }
@@ -133,6 +213,7 @@ private struct SidebarView: View {
             Spacer()
         }
         .padding(18)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var statusText: String {
@@ -247,6 +328,7 @@ private struct CandidateRow: View {
 }
 
 private struct CandidateDetailView: View {
+    @EnvironmentObject private var model: AppModel
     let candidate: CandidateReport?
 
     var body: some View {
@@ -284,6 +366,14 @@ private struct CandidateDetailView: View {
                         ForEach(candidate.evidence) { item in
                             EvidenceRow(item: item)
                         }
+                    }
+
+                    if !candidate.domains.isEmpty {
+                        DomainSection(domains: candidate.domains)
+                    }
+
+                    if let summary = model.currentRun?.advisorySummary {
+                        AdvisorySummaryCard(summary: summary)
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -420,6 +510,8 @@ private struct EvidenceRow: View {
             "cpu"
         case .caution:
             "exclamationmark.triangle"
+        case .domain:
+            "square.stack.3d.up"
         }
     }
 
@@ -433,6 +525,8 @@ private struct EvidenceRow: View {
             .indigo
         case .caution:
             .orange
+        case .domain:
+            .purple
         }
     }
 }
@@ -479,5 +573,210 @@ private extension String {
         guard count > maxLength else { return self }
         let endIndex = index(startIndex, offsetBy: maxLength - 1)
         return String(self[..<endIndex]) + "..."
+    }
+}
+
+
+// MARK: - Settings
+
+private struct RankingSettingsSection: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Ranking")
+                .font(.headline)
+
+            Stepper(value: $model.maximumCandidates, in: 1...100) {
+                LabeledContent("Max candidates", value: "\(model.maximumCandidates)")
+                    .font(.callout)
+            }
+
+            BiasSlider(title: "Novelty", value: $model.noveltyBias)
+            BiasSlider(title: "Confidence", value: $model.confidenceBias)
+            BiasSlider(title: "Compute value", value: $model.machineLoadBias)
+
+            HStack(spacing: 8) {
+                Button("Reference FASTA…") { model.isImportingReference = true }
+                    .disabled(!model.canUseReferenceFASTA)
+                if model.referenceFASTAPath != nil {
+                    Button("Clear") { model.setReferenceFASTA(nil) }
+                }
+            }
+            .font(.callout)
+
+            if !model.canUseReferenceFASTA {
+                Text("Import a FASTA file to search it against a reference database.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let reference = model.referenceFASTAPath {
+                Text(reference)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.head)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+}
+
+private struct BiasSlider: View {
+    let title: String
+    @Binding var value: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title)
+                    .font(.callout)
+                Spacer()
+                Text(String(format: "%.2f", value))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: 0...1)
+        }
+    }
+}
+
+private struct OptionalEvidenceSection: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Optional Evidence")
+                .font(.headline)
+            Text("Advisory only. Neither changes a novelty, confidence, or compute-value score.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Pfam domains (hmmscan)", isOn: $model.enablePfamDomains)
+                .font(.callout)
+            if model.enablePfamDomains {
+                HStack(spacing: 8) {
+                    Button("Pfam-A.hmm…") { model.isImportingPfamDatabase = true }
+                    if model.pfamDatabaseURL != nil {
+                        Button("Clear") { model.setPfamDatabase(nil) }
+                    }
+                }
+                .font(.callout)
+                if !model.pfamAvailabilityMessage.isEmpty {
+                    AvailabilityNote(message: model.pfamAvailabilityMessage)
+                }
+            }
+
+            Toggle("Local LLM summary (ollama)", isOn: $model.enableLocalSummary)
+                .font(.callout)
+            if model.enableLocalSummary {
+                TextField("Model", text: $model.localSummaryModel)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+                    .onSubmit { model.refreshAdapterAvailability() }
+                if !model.summaryAvailabilityMessage.isEmpty {
+                    AvailabilityNote(message: model.summaryAvailabilityMessage)
+                }
+            }
+        }
+    }
+}
+
+private struct AvailabilityNote: View {
+    let message: String
+
+    private var isReady: Bool {
+        message.contains("ready")
+    }
+
+    var body: some View {
+        Label(message, systemImage: isReady ? "checkmark.circle" : "info.circle")
+            .font(.caption)
+            .foregroundStyle(isReady ? Color.green : Color.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - Domain and summary presentation
+
+private struct DomainSection: View {
+    let domains: [DomainHit]
+
+    private var sorted: [DomainHit] {
+        domains.sorted { $0.bitScore > $1.bitScore }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text("Pfam Domains")
+                    .font(.headline)
+                Text("advisory")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+            }
+            ForEach(sorted) { hit in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(hit.name)
+                            .font(.callout.weight(.medium))
+                        Text(hit.accession)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.1f bits", hit.bitScore))
+                            .font(.caption.monospacedDigit())
+                    }
+                    if !hit.description.isEmpty {
+                        Text(hit.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("residues \(hit.alignmentFrom)–\(hit.alignmentTo) · i-E-value \(String(format: "%.1e", hit.independentEValue)) · \(Int((hit.modelCoverage * 100).rounded()))% of the profile")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    ProgressView(value: hit.modelCoverage)
+                }
+                .padding(12)
+                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+}
+
+private struct AdvisorySummaryCard: View {
+    let summary: AdvisorySummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.bubble")
+                Text("Advisory Summary (this run)")
+                    .font(.headline)
+                Text("not evidence")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.25), in: Capsule())
+            }
+            Text(summary.disclaimer)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(summary.text)
+                .font(.callout)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(summary.backend)/\(summary.model)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
     }
 }

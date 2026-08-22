@@ -77,6 +77,8 @@ public struct EvidenceItem: Identifiable, Codable, Hashable, Sendable {
         case structure
         case machineLoad
         case caution
+        /// Profile-HMM (Pfam) evidence. Advisory: it never changes a score.
+        case domain
     }
 
     public let id: UUID
@@ -108,6 +110,73 @@ public struct CandidateReport: Identifiable, Codable, Hashable, Sendable {
     public let sequence: ProteinSequence
     public let features: SequenceFeatures
     public let evidence: [EvidenceItem]
+    /// Optional Pfam domain hits. Empty when HMMER or the database is absent.
+    public let domains: [DomainHit]
+
+    public init(
+        id: String,
+        rank: Int,
+        title: String,
+        classification: String,
+        noveltyScore: Double,
+        confidenceScore: Double,
+        machineLoadScore: Double,
+        hypothesis: String,
+        sequence: ProteinSequence,
+        features: SequenceFeatures,
+        evidence: [EvidenceItem],
+        domains: [DomainHit] = []
+    ) {
+        self.id = id
+        self.rank = rank
+        self.title = title
+        self.classification = classification
+        self.noveltyScore = noveltyScore
+        self.confidenceScore = confidenceScore
+        self.machineLoadScore = machineLoadScore
+        self.hypothesis = hypothesis
+        self.sequence = sequence
+        self.features = features
+        self.evidence = evidence
+        self.domains = domains
+    }
+
+    /// Returns a copy carrying domain hits and their advisory evidence entries.
+    public func addingDomains(_ hits: [DomainHit]) -> CandidateReport {
+        guard !hits.isEmpty else { return self }
+        return CandidateReport(
+            id: id,
+            rank: rank,
+            title: title,
+            classification: classification,
+            noveltyScore: noveltyScore,
+            confidenceScore: confidenceScore,
+            machineLoadScore: machineLoadScore,
+            hypothesis: hypothesis,
+            sequence: sequence,
+            features: features,
+            evidence: evidence + PfamDomainAdapter.evidence(for: hits),
+            domains: hits
+        )
+    }
+
+    // `domains` was added after the first report schema shipped. Decoding it as
+    // optional keeps every previously written run JSON readable.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        rank = try container.decode(Int.self, forKey: .rank)
+        title = try container.decode(String.self, forKey: .title)
+        classification = try container.decode(String.self, forKey: .classification)
+        noveltyScore = try container.decode(Double.self, forKey: .noveltyScore)
+        confidenceScore = try container.decode(Double.self, forKey: .confidenceScore)
+        machineLoadScore = try container.decode(Double.self, forKey: .machineLoadScore)
+        hypothesis = try container.decode(String.self, forKey: .hypothesis)
+        sequence = try container.decode(ProteinSequence.self, forKey: .sequence)
+        features = try container.decode(SequenceFeatures.self, forKey: .features)
+        evidence = try container.decode([EvidenceItem].self, forKey: .evidence)
+        domains = try container.decodeIfPresent([DomainHit].self, forKey: .domains) ?? []
+    }
 }
 
 public struct DiscoveryRun: Identifiable, Codable, Hashable, Sendable {
@@ -117,6 +186,8 @@ public struct DiscoveryRun: Identifiable, Codable, Hashable, Sendable {
     public let candidates: [CandidateReport]
     public let toolStatuses: [ToolStatus]
     public let notes: [String]
+    /// Optional local-LLM wording. Never an input to any score or validation.
+    public let advisorySummary: AdvisorySummary?
 
     public init(
         id: UUID = UUID(),
@@ -124,7 +195,8 @@ public struct DiscoveryRun: Identifiable, Codable, Hashable, Sendable {
         configuration: DiscoveryConfiguration,
         candidates: [CandidateReport],
         toolStatuses: [ToolStatus],
-        notes: [String]
+        notes: [String],
+        advisorySummary: AdvisorySummary? = nil
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -132,6 +204,45 @@ public struct DiscoveryRun: Identifiable, Codable, Hashable, Sendable {
         self.candidates = candidates
         self.toolStatuses = toolStatuses
         self.notes = notes
+        self.advisorySummary = advisorySummary
+    }
+
+    /// Returns a copy whose candidates carry Pfam domain evidence.
+    public func replacingCandidates(_ candidates: [CandidateReport]) -> DiscoveryRun {
+        DiscoveryRun(
+            id: id,
+            startedAt: startedAt,
+            configuration: configuration,
+            candidates: candidates,
+            toolStatuses: toolStatuses,
+            notes: notes,
+            advisorySummary: advisorySummary
+        )
+    }
+
+    public func addingNotes(_ extra: [String]) -> DiscoveryRun {
+        guard !extra.isEmpty else { return self }
+        return DiscoveryRun(
+            id: id,
+            startedAt: startedAt,
+            configuration: configuration,
+            candidates: candidates,
+            toolStatuses: toolStatuses,
+            notes: notes + extra,
+            advisorySummary: advisorySummary
+        )
+    }
+
+    public func addingAdvisorySummary(_ summary: AdvisorySummary?) -> DiscoveryRun {
+        DiscoveryRun(
+            id: id,
+            startedAt: startedAt,
+            configuration: configuration,
+            candidates: candidates,
+            toolStatuses: toolStatuses,
+            notes: notes,
+            advisorySummary: summary
+        )
     }
 }
 
@@ -143,4 +254,22 @@ public struct ToolStatus: Identifiable, Codable, Hashable, Sendable {
     public let resolvedPath: String?
     public let role: String
     public let installHint: String
+
+    public init(
+        id: String,
+        displayName: String,
+        executableName: String,
+        isAvailable: Bool,
+        resolvedPath: String?,
+        role: String,
+        installHint: String
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.executableName = executableName
+        self.isAvailable = isAvailable
+        self.resolvedPath = resolvedPath
+        self.role = role
+        self.installHint = installHint
+    }
 }

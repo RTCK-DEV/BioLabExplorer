@@ -25,6 +25,7 @@ def _fasta(path, records):
 class DiscoveryDBTests(unittest.TestCase):
     def test_sha_normalized(self):
         self.assertEqual(db.seq_sha256("acdefg"), db.seq_sha256("  ACDEFG "))
+        self.assertEqual(db.seq_sha256("AC D\nEFG"), db.seq_sha256("ACDEFG"))
 
     def test_within_batch_dedup(self):
         with tempfile.TemporaryDirectory() as d:
@@ -46,6 +47,43 @@ class DiscoveryDBTests(unittest.TestCase):
             con = sqlite3.connect(dbp)
             verds = dict(con.execute("SELECT accession,verdict FROM processed").fetchall())
             self.assertEqual(verds, {"A1": "actionable", "B2": "screened"})
+
+    def test_sequence_payload_roundtrips_for_simulation(self):
+        with tempfile.TemporaryDirectory() as d:
+            rd = os.path.join(d, "cycle_x")
+            _fixture(rd, [_cand("A1", "MKT")], ["A1"])
+            fa = os.path.join(d, "in.fasta")
+            _fasta(fa, [("A1", "mkt")])
+            dbp = os.path.join(d, "l.db")
+            db.record(fa, rd, dbp, os.path.join(d, "D.md"), 7, "cycle_x")
+            out = os.path.join(d, "candidates.json")
+            self.assertEqual(db.export_new_actionable(dbp, 7, out), 1)
+            with open(out, encoding="utf-8") as fh:
+                payload = json.load(fh)
+            self.assertEqual(payload[0]["sequence"], "MKT")
+            self.assertEqual(payload[0]["seqSha256"], db.seq_sha256("MKT"))
+            self.assertEqual(payload[0]["classification"], "Remote PBP")
+            self.assertEqual(payload[0]["score"], 0.9)
+
+    def test_v1_database_migrates_without_losing_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            dbp = os.path.join(d, "v1.db")
+            con = sqlite3.connect(dbp)
+            con.execute("""CREATE TABLE processed (
+                seq_sha256 TEXT PRIMARY KEY, accession TEXT NOT NULL,
+                verdict TEXT NOT NULL, score REAL, classification TEXT,
+                first_seen_cycle INTEGER NOT NULL, run_id TEXT NOT NULL,
+                ts TEXT NOT NULL, schema_version INTEGER NOT NULL)""")
+            con.execute("INSERT INTO processed VALUES (?,?,?,?,?,?,?,?,?)",
+                        ("abc", "OLD", "screened", None, None, 1, "r", "t", 1))
+            con.commit(); con.close()
+            migrated = db.connect(dbp)
+            try:
+                columns = {row[1] for row in migrated.execute("PRAGMA table_info(processed)")}
+                self.assertIn("sequence", columns)
+                self.assertEqual(migrated.execute("SELECT COUNT(*) FROM processed").fetchone()[0], 1)
+            finally:
+                migrated.close()
 
     def test_idempotent_across_cycles(self):
         with tempfile.TemporaryDirectory() as d:

@@ -1,4 +1,4 @@
-import json, os, stat, sys, tempfile, unittest
+import hashlib, json, os, stat, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 import sim_queue as sq
 
@@ -16,6 +16,12 @@ def _stub(dirpath, name, body="#!/bin/sh\necho stub-ok\nexit 0\n"):
     return p
 
 
+def _candidate(accession, sequence):
+    normalized = "".join(sequence.split()).upper()
+    return {"accession": accession, "sequence": sequence,
+            "seqSha256": hashlib.sha256(normalized.encode()).hexdigest()}
+
+
 class DetectTests(unittest.TestCase):
     def test_absent_backend_is_visible_not_fatal(self):
         with tempfile.TemporaryDirectory() as d:
@@ -31,6 +37,7 @@ class DetectTests(unittest.TestCase):
     def test_stub_backend_detected(self):
         with tempfile.TemporaryDirectory() as d:
             _stub(d, "vina")
+            _stub(d, "mk_prepare_receptor.py")
             os.environ["SIM_BIN_DIR"] = d
             try:
                 det = sq.detect_backends(CFG)
@@ -100,13 +107,47 @@ class ScheduleTests(unittest.TestCase):
 
 
 class RunTests(unittest.TestCase):
+    def test_weighted_sequence_cpu_allocation_is_exact_and_work_conserving(self):
+        original = sq.os.cpu_count
+        sq.os.cpu_count = lambda: 15
+        try:
+            both = sq._sequence_cpu_threads(
+                [{"backend": "mmseqs"}, {"backend": "hmmer"}],
+                {"simMmseqsCpuWeight": 1, "simHmmerCpuWeight": 2},
+            )
+            hmmer_only = sq._sequence_cpu_threads([{"backend": "hmmer"}], CFG)
+        finally:
+            sq.os.cpu_count = original
+        self.assertEqual(both, {"mmseqs": 5, "hmmer": 10})
+        self.assertEqual(sum(both.values()), 15)
+        self.assertEqual(hmmer_only, {"hmmer": 15})
+
+    def test_fasta_input_uses_shared_accession_and_checksum_contract(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "input.fasta")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(">tr|A0TEST|ENTRY description\nmk t\n>bare-id note\nACD\n")
+            candidates = sq.load_fasta_candidates(path)
+            self.assertEqual([item["accession"] for item in candidates], ["A0TEST", "bare-id"])
+            self.assertEqual(candidates[0]["sequence"], "MKT")
+            self.assertEqual(candidates[0]["seqSha256"], hashlib.sha256(b"MKT").hexdigest())
+            self.assertEqual(sq._validated_candidates(candidates)[0]["sequence"], "MKT")
+
+    def test_accession_filter_requires_one_exact_match(self):
+        candidates = [_candidate("A1", "MKT"), _candidate("A10", "AAA")]
+        self.assertEqual(sq.filter_candidates(candidates, "A1")[0]["accession"], "A1")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            sq.filter_candidates(candidates, "A")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            sq.filter_candidates(candidates + [_candidate("A1", "CCC")], "A1")
+
     def test_run_with_no_backends_reports_cleanly(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["SIM_BIN_DIR"] = os.path.join(d, "empty")
             os.makedirs(os.environ["SIM_BIN_DIR"])
             try:
                 rd = os.path.join(d, "run"); os.makedirs(rd)
-                cands = [{"accession": "A1", "sequence": "MKT" * 10}]
+                cands = [_candidate("A1", "MKT" * 10)]
                 summary = sq.run(cands, rd, CFG)
             finally:
                 os.environ.pop("SIM_BIN_DIR", None)
@@ -116,16 +157,117 @@ class RunTests(unittest.TestCase):
 
     def test_run_dispatches_available_stub(self):
         with tempfile.TemporaryDirectory() as d:
-            b = os.path.join(d, "bin"); _stub(b, "mmseqs")
+            b = os.path.join(d, "bin")
+            _stub(b, "mmseqs", "#!/bin/sh\ncat \"$2\" > \"$4.input\"\nprintf 'hit\\n' > \"$4\"\n")
+            reference = os.path.join(d, "reference.fasta")
+            with open(reference, "w") as fh:
+                fh.write(">REF\nMKT\n")
             os.environ["SIM_BIN_DIR"] = b
             try:
                 rd = os.path.join(d, "run"); os.makedirs(rd)
-                cands = [{"accession": "A1", "sequence": "MKT" * 10}]
-                summary = sq.run(cands, rd, CFG)
+                cands = [_candidate("A1", "MKT" * 10)]
+                summary = sq.run(cands, rd, CFG, reference=reference)
             finally:
                 os.environ.pop("SIM_BIN_DIR", None)
             self.assertGreaterEqual(summary["ran"], 1)
-            self.assertTrue(any(j["backend"] == "mmseqs" and j["status"] == "ok" for j in summary["jobs"]))
+            job = next(j for j in summary["jobs"] if j["backend"] == "mmseqs")
+            self.assertEqual(job["status"], "ok")
+            self.assertTrue(os.path.exists(job["output"] + ".input"))
+            with open(job["output"] + ".input") as fh:
+                self.assertIn(">A1\nMKT", fh.read())
+
+    def test_batch_search_uses_all_candidates_and_cpu_threads(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = os.path.join(d, "bin")
+            _stub(b, "mmseqs", "#!/bin/sh\nsleep 0.1\nprintf 'hit\\n' > \"$4\"\n")
+            reference = os.path.join(d, "reference.fasta")
+            with open(reference, "w") as fh:
+                fh.write(">REF\nMKT\n")
+            os.environ["SIM_BIN_DIR"] = b
+            try:
+                rd = os.path.join(d, "run"); os.makedirs(rd)
+                cands = [_candidate(f"A{i}", "MKT" * 10) for i in range(6)]
+                summary = sq.run(cands, rd, CFG, reference=reference)
+            finally:
+                os.environ.pop("SIM_BIN_DIR", None)
+            self.assertEqual(summary["ran"], 1)
+            self.assertEqual(summary["candidateCount"], 6)
+            self.assertEqual(summary["resources"]["maxConcurrentObserved"], 1)
+            self.assertGreaterEqual(summary["jobs"][0]["cpuThreads"], 2)
+            self.assertEqual(summary["resources"]["cpuThreadsPerJob"],
+                             summary["jobs"][0]["cpuThreads"])
+            self.assertEqual(summary["resources"]["maxConcurrentCpuThreadsConfigured"],
+                             summary["jobs"][0]["cpuThreads"])
+            self.assertLessEqual(summary["resources"]["peakEstimatedRamBytes"],
+                                 summary["resources"]["ramBudgetBytes"])
+
+    def test_dynamic_dispatch_refills_after_ram_is_released(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe = _stub(d, "mmseqs", "#!/bin/sh\nsleep 0.05\nprintf 'hit\\n' > \"$4\"\n")
+            reference = os.path.join(d, "reference.fasta")
+            with open(reference, "w") as fh:
+                fh.write(">REF\nMKT\n")
+            rd = os.path.join(d, "run"); os.makedirs(rd)
+            jobs = [
+                {"accession": f"A{i}", "sequence": "MKT", "seq_len": 3, "backend": "mmseqs"}
+                for i in range(3)
+            ]
+            cfg = {**CFG, "simRamBudgetBytes": sq.GIB, "simMinMemoryFreePercent": 0,
+                   "simMaxCpuJobs": 3, "simShutdownGraceSeconds": 1}
+            results, skipped, resources = sq._run_parallel(
+                jobs, {"mmseqs": {"available": True, "path": exe}}, rd, cfg,
+                reference, time.monotonic() + 30,
+            )
+            self.assertEqual(len(results), 3)
+            self.assertEqual(skipped, [])
+            self.assertEqual(resources["maxConcurrentObserved"], 1)
+            self.assertLessEqual(resources["peakEstimatedRamBytes"], sq.GIB)
+
+    def test_soft_budget_stops_new_admission(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = os.path.join(d, "bin")
+            _stub(b, "mmseqs", "#!/bin/sh\nprintf 'hit\\n' > \"$4\"\n")
+            reference = os.path.join(d, "reference.fasta")
+            with open(reference, "w") as fh:
+                fh.write(">REF\nMKT\n")
+            os.environ["SIM_BIN_DIR"] = b
+            try:
+                rd = os.path.join(d, "run"); os.makedirs(rd)
+                cfg = {**CFG, "simShutdownGraceSeconds": 5}
+                summary = sq.run([_candidate("A1", "MKT")], rd, cfg,
+                                 reference=reference, budget_seconds=1)
+            finally:
+                os.environ.pop("SIM_BIN_DIR", None)
+            self.assertEqual(summary["ran"], 0)
+            self.assertTrue(any(item["reason_code"] == "budget_expired"
+                                for item in summary["skipped"]))
+
+    def test_timeout_kills_spawned_process_group(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe = _stub(d, "mmseqs", "#!/bin/sh\ntrap '' TERM\nsleep 10\n")
+            reference = os.path.join(d, "reference.fasta")
+            with open(reference, "w") as fh:
+                fh.write(">REF\nMKT\n")
+            rd = os.path.join(d, "run"); os.makedirs(rd)
+            job = {"accession": "TIMEOUT", "sequence": "MKT", "seq_len": 3,
+                   "backend": "mmseqs"}
+            cfg = {**CFG, "simTerminationGraceSeconds": 1}
+            started = time.monotonic()
+            result = sq._run_command(
+                job, {"mmseqs": {"available": True, "path": exe}}, rd, cfg,
+                reference, cpu_threads=1, timeout=1,
+            )
+            self.assertEqual(result["status"], "timeout")
+            self.assertLess(time.monotonic() - started, 4)
+
+    def test_candidate_checksum_is_required_and_verified(self):
+        with tempfile.TemporaryDirectory() as d:
+            rd = os.path.join(d, "run"); os.makedirs(rd)
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                sq.run([{"accession": "A1", "sequence": "MKT", "seqSha256": "0" * 64}],
+                       rd, CFG)
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                sq.run([{"accession": "A1", "sequence": "MKT"}], rd, CFG)
 
 
 if __name__ == "__main__":

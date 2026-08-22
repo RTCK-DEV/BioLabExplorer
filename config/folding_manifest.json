@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "backend": "huggingface-esmfold",
+  "modelId": "facebook/esmfold_v1",
+  "revision": "75a3841ee059df2bf4d56688166c8fb459ddd97a",
+  "maxSequenceLength": 700,
+  "chunkSize": 64,
+  "interpretation": "Predicted structure only. pLDDT is model confidence, not experimental validation."
+}

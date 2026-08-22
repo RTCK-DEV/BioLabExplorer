@@ -11,7 +11,7 @@ sandbox() {
   echo "$d"
 }
 ok_pipe="bash ${ROOT}/Tests/perpetual/fake_pipeline.sh"
-fail_pipe="bash -c 'exit 7'"
+fail_pipe="/usr/bin/false"
 run() {  # $1=sandbox $2=pipeline_cmd
   STATE_DIR="$1/state" RUNS_DIR="$1/runs" DISCOVERIES_DIR="$1/discoveries" \
   REFERENCE="$1/ref/ref.fasta" LOG_DIR="$1/logs" NOTIFY_CMD="true" \
@@ -58,6 +58,17 @@ if [[ -f "$S/logs/daemon.out.log" ]]; then
   sz="$(wc -c < "$S/logs/daemon.out.log" | tr -d ' ')"
   [[ "$sz" -lt 10 ]] || { echo "FAIL: live daemon.out.log still oversized after rotation"; exit 1; }
 fi
+
+# 5b) only generated cycle logs are pruned to maxLogFiles; daemon logs and run
+# artifacts are outside this retention operation.
+S="$(sandbox)"
+printf '{"diskFloorGB":0,"maxCandidates":20,"maxWorkspaceBytes":1073741824000,"maxLogFiles":2,"maxDaemonLogBytes":10485760,"budgetSeconds":60,"maxConsecutiveFailures":2,"throttleSeconds":300}' > "$S/worker.json"
+for n in 1 2 3 4; do printf 'old-%s\n' "$n" > "$S/logs/cycle-old-$n.log"; done
+printf 'keep-me\n' > "$S/logs/daemon.out.log"
+printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/b.fasta"
+run "$S" "$ok_pipe"
+[[ "$(find "$S/logs" -maxdepth 1 -name 'cycle-*.log' | wc -l | tr -d ' ')" == "2" ]] || { echo "FAIL: maxLogFiles retention boundary"; exit 1; }
+[[ -f "$S/logs/daemon.out.log" ]] || { echo "FAIL: cycle retention removed daemon log"; exit 1; }
 
 # 6) STOP kill-switch must survive a broken config: cfg() must not abort before the STOP gate
 S="$(sandbox)"; : > "$S/state/STOP"

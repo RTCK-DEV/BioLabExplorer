@@ -33,6 +33,25 @@ printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/b.fasta"; run "$S"
 S="$(sandbox)"; run "$S"
 [[ -z "$(ls -A "$S/runs")" ]] || { echo "FAIL: empty inbox made a run"; exit 1; }
 
+# 3a) workspace quota fires before a run directory or ledger is created
+S="$(sandbox)"
+printf '{"diskFloorGB":0,"maxCandidates":20,"maxWorkspaceBytes":1,"maxLogFiles":200,"budgetSeconds":60}' > "$S/worker.json"
+printf 'owned-run-data' > "$S/runs/seed.bin"
+printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/quota.fasta"
+run "$S"
+[[ -z "$(find "$S/runs" -maxdepth 1 -type d -name 'cycle_*' -print -quit)" ]] || { echo "FAIL: workspace quota created a cycle"; exit 1; }
+[[ ! -f "$S/discoveries/ledger.db" ]] || { echo "FAIL: workspace quota wrote ledger"; exit 1; }
+[[ -f "$S/state/inbox/quota.fasta" ]] || { echo "FAIL: workspace quota consumed input"; exit 1; }
+
+# 3b) dry-run validates without consuming input or creating worker state
+S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/dry.fasta"
+STATE_DIR="$S/state" RUNS_DIR="$S/runs" DISCOVERIES_DIR="$S/discoveries" \
+  REFERENCE="$S/ref/ref.fasta" LOG_DIR="$S/logs" NOTIFY_CMD="true" \
+  CONFIG="$S/worker.json" PIPELINE_CMD="bash ${ROOT}/Tests/perpetual/fake_pipeline.sh" \
+  bash "$CYCLE" --dry-run --budget-seconds 17
+[[ -f "$S/state/inbox/dry.fasta" ]] || { echo "FAIL: dry-run consumed input"; exit 1; }
+[[ -z "$(ls -A "$S/runs")" && ! -f "$S/discoveries/ledger.db" ]] || { echo "FAIL: dry-run mutated outputs"; exit 1; }
+
 # 4) happy path
 S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/batch1.fasta"; run "$S"
 [[ "$(count_actionable "$S")" == "1" ]] || { echo "FAIL: actionable != 1"; exit 1; }
@@ -47,7 +66,8 @@ printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/b2.fasta"; run "$S"
 # 6) non-overwriting processed: a colliding basename must not clobber
 S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/dup.fasta"; run "$S"
 printf '>OTHER\nMMMM\n' > "$S/state/inbox/dup.fasta"; run "$S"
-[[ "$(ls "$S/state/inbox/processed/" | grep -c dup.fasta)" == "2" ]] || { echo "FAIL: processed overwrite"; exit 1; }
+shopt -s nullglob; processed_dups=("$S"/state/inbox/processed/*dup.fasta*); shopt -u nullglob
+[[ "${#processed_dups[@]}" -eq 2 ]] || { echo "FAIL: processed overwrite (found ${#processed_dups[@]})"; exit 1; }
 
 # 7) manifest digest MATCH -> cycle proceeds
 S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/batch7.fasta"
@@ -67,14 +87,39 @@ set +e; run "$S"; rc=$?; set -e
 [[ -f "$S/state/inbox/batch8.fasta" ]] || { echo "FAIL: manifest mismatch consumed batch"; exit 1; }
 [[ -z "$(ls -A "$S/state/inbox/processed")" ]] || { echo "FAIL: manifest mismatch batch reached processed"; exit 1; }
 
-# df failure must NOT abort the cycle nor falsely trip the disk-floor pause
+# df failure must fail closed and preserve the input (capacity is unknown)
 S="$(sandbox)"; printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/dffail.fasta"
 mkdir -p "$S/fakebin"; printf '#!/bin/sh\nexit 1\n' > "$S/fakebin/df"; chmod +x "$S/fakebin/df"
 STATE_DIR="$S/state" RUNS_DIR="$S/runs" DISCOVERIES_DIR="$S/discoveries" \
   REFERENCE="$S/ref/ref.fasta" LOG_DIR="$S/logs" NOTIFY_CMD="true" \
   CONFIG="$S/worker.json" PIPELINE_CMD="bash ${ROOT}/Tests/perpetual/fake_pipeline.sh" \
-  PATH="$S/fakebin:$PATH" bash "$CYCLE"
-[[ "$(count_actionable "$S")" == "1" ]] || { echo "FAIL: df failure aborted/false-paused the cycle"; exit 1; }
-ls "$S/state/inbox/processed/"*dffail.fasta >/dev/null 2>&1 || { echo "FAIL: df failure prevented batch consumption"; exit 1; }
+  PATH="$S/fakebin:$PATH" bash "$CYCLE" && { echo "FAIL: df failure did not fail closed"; exit 1; }
+[[ ! -f "$S/discoveries/ledger.db" ]] || { echo "FAIL: df failure wrote ledger"; exit 1; }
+[[ -f "$S/state/inbox/dffail.fasta" ]] || { echo "FAIL: df failure consumed batch"; exit 1; }
+
+# malformed rotation must fail closed rather than silently resetting to cycle 1
+S="$(sandbox)"; printf '{broken' > "$S/state/rotation.json"
+printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/badrot.fasta"
+set +e; run "$S"; rc=$?; set -e
+[[ "$rc" -ne 0 ]] || { echo "FAIL: malformed rotation was accepted"; exit 1; }
+[[ -f "$S/state/inbox/badrot.fasta" ]] || { echo "FAIL: malformed rotation consumed input"; exit 1; }
+[[ -z "$(ls -A "$S/runs")" ]] || { echo "FAIL: malformed rotation created run"; exit 1; }
+
+# A required post-ledger product failure must leave the input replayable. The
+# retry uses the same cycle, preserves one ledger row, and then archives once.
+S="$(sandbox)"; mkdir "$S/discoveries/dashboard.html"
+printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/replay.fasta"
+set +e; run "$S"; rc=$?; set -e
+[[ "$rc" -ne 0 ]] || { echo "FAIL: blocked dashboard did not fail the cycle"; exit 1; }
+[[ -f "$S/state/inbox/replay.fasta" ]] || { echo "FAIL: failed post-ledger cycle consumed input"; exit 1; }
+[[ ! -f "$S/state/rotation.json" ]] || { echo "FAIL: failed post-ledger cycle committed rotation"; exit 1; }
+[[ "$(count_actionable "$S")" == "1" ]] || { echo "FAIL: failed post-ledger cycle ledger state"; exit 1; }
+[[ "$(find "$S/runs" -name .failed | wc -l | tr -d ' ')" == "1" ]] || { echo "FAIL: failed marker missing"; exit 1; }
+mv "$S/discoveries/dashboard.html" "$S/discoveries/dashboard.blocked"
+run "$S"
+[[ "$(count_actionable "$S")" == "1" ]] || { echo "FAIL: replay duplicated ledger row"; exit 1; }
+python3 -c "import json,sys; d=json.load(open('$S/state/rotation.json')); sys.exit(0 if d.get('cycle')==1 else 1)" || { echo "FAIL: replay did not retain cycle 1"; exit 1; }
+[[ ! -f "$S/state/inbox/replay.fasta" ]] || { echo "FAIL: successful replay did not archive input"; exit 1; }
+[[ "$(find "$S/runs" -name .complete | wc -l | tr -d ' ')" == "1" ]] || { echo "FAIL: replay completion marker missing"; exit 1; }
 
 echo "cycle offline tests OK"

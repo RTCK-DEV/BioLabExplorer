@@ -24,6 +24,12 @@ public struct ToolProbe: Sendable {
                 installHint: "Install HMMER to compare candidates against curated domain profiles."
             ),
             ToolDefinition(
+                displayName: "HMMER (hmmscan)",
+                executableName: "hmmscan",
+                role: "Pfam profile-HMM domain annotation for candidates",
+                installHint: "Install HMMER and a hmmpress-ed Pfam-A.hmm (scripts/setup_pfam.sh) for domain evidence."
+            ),
+            ToolDefinition(
                 displayName: "Foldseek",
                 executableName: "foldseek",
                 role: "Fast predicted-structure comparison",

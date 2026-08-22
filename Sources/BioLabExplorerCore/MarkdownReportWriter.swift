@@ -28,6 +28,17 @@ public enum MarkdownReportWriter {
         for note in run.notes {
             lines.append("- \(note)")
         }
+        if let summary = run.advisorySummary {
+            lines.append("")
+            lines.append("## Advisory Summary (not evidence)")
+            lines.append("")
+            lines.append("> \(summary.disclaimer)")
+            lines.append("")
+            lines.append("Model: `\(summary.backend)/\(summary.model)`")
+            lines.append("")
+            lines.append(summary.text)
+        }
+
         let validation = DiscoveryValidator.validate(run)
         lines.append("")
         lines.append("## Discovery Validation")
@@ -79,6 +90,16 @@ public enum MarkdownReportWriter {
             lines.append("Evidence:")
             for item in candidate.evidence.prefix(8) {
                 lines.append("- \(item.title) (\(item.value)): \(item.note)")
+            }
+            if !candidate.domains.isEmpty {
+                lines.append("")
+                lines.append("Pfam domains (advisory, not scored):")
+                lines.append("")
+                lines.append("| Domain | Accession | Bit score | i-E-value | Residues | Profile coverage |")
+                lines.append("| --- | --- | ---: | ---: | --- | ---: |")
+                for hit in candidate.domains.sorted(by: { $0.bitScore > $1.bitScore }) {
+                    lines.append("| \(hit.name) | \(hit.accession) | \(String(format: "%.1f", hit.bitScore)) | \(String(format: "%.1e", hit.independentEValue)) | \(hit.alignmentFrom)-\(hit.alignmentTo) | \(Int((hit.modelCoverage * 100).rounded()))% |")
+                }
             }
             lines.append("")
         }

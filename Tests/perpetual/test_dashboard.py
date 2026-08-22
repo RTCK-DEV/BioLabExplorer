@@ -25,34 +25,52 @@ def _pdb_text():
             "END\n")
 
 
-def _generate(d, db, cycle=1, enable_network=False, af=None, assets=None):
-    rot = os.path.join(d, "rotation.json"); json.dump({"cycle": cycle}, open(rot, "w"))
-    cfg = os.path.join(d, "worker.json"); json.dump({"enableNetwork": enable_network}, open(cfg, "w"))
+def _write_json(path, value):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(value, fh)
+
+
+def _write_text(path, value):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(value)
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _generate(d, db, cycle=1, enable_network=False, af=None, assets=None, runs=None):
+    rot = os.path.join(d, "rotation.json"); _write_json(rot, {"cycle": cycle})
+    cfg = os.path.join(d, "worker.json"); _write_json(cfg, {"enableNetwork": enable_network})
     if af is None:
         af = os.path.join(d, "af"); os.makedirs(af, exist_ok=True)
     if assets is None:
         assets = os.path.join(d, "assets")  # absent by default
     out = os.path.join(d, "dashboard.html")
-    gd.main(["--db", db, "--rotation", rot, "--config", cfg,
-             "--alphafold-cache", af, "--assets-dir", assets, "--out", out])
-    return open(out).read()
+    args = ["--db", db, "--rotation", rot, "--config", cfg,
+            "--alphafold-cache", af, "--assets-dir", assets, "--out", out]
+    if runs:
+        args.extend(["--runs-dir", runs])
+    gd.main(args)
+    return _read_text(out)
 
 
 class DashboardTests(unittest.TestCase):
     def test_generates_selfcontained_html_with_sections(self):
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "ledger.db"); _seed_db(db)
-            rot = os.path.join(d, "rotation.json"); json.dump({"cycle": 2}, open(rot, "w"))
-            cfg = os.path.join(d, "worker.json"); json.dump({"enableNetwork": False}, open(cfg, "w"))
+            rot = os.path.join(d, "rotation.json"); _write_json(rot, {"cycle": 2})
+            cfg = os.path.join(d, "worker.json"); _write_json(cfg, {"enableNetwork": False})
             af = os.path.join(d, "af"); os.makedirs(af)
             # a fake AlphaFold PDB for G6AGY4 (one ATOM w/ pLDDT in b-factor col)
-            open(os.path.join(af, "AF-G6AGY4-F1-model_v6.pdb"), "w").write(
+            _write_text(os.path.join(af, "AF-G6AGY4-F1-model_v6.pdb"),
                 "ATOM      1  CA  MET A   1      11.000  22.000  33.000  1.00 87.50           C\nEND\n")
             assets = os.path.join(d, "assets")  # intentionally absent -> no 3Dmol script
             out = os.path.join(d, "dashboard.html")
             gd.main(["--db", db, "--rotation", rot, "--config", cfg,
                      "--alphafold-cache", af, "--assets-dir", assets, "--out", out])
-            html_doc = open(out).read()
+            html_doc = _read_text(out)
             self.assertIn("<!doctype html>", html_doc.lower())
             self.assertIn("cycles", html_doc.lower())
             self.assertIn("G6AGY4", html_doc)                    # discoveries table
@@ -66,17 +84,17 @@ class DashboardTests(unittest.TestCase):
     def test_embeds_pdb_and_script_when_asset_present(self):
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "ledger.db"); _seed_db(db)
-            rot = os.path.join(d, "rotation.json"); json.dump({"cycle": 2}, open(rot, "w"))
-            cfg = os.path.join(d, "worker.json"); json.dump({"enableNetwork": True}, open(cfg, "w"))
+            rot = os.path.join(d, "rotation.json"); _write_json(rot, {"cycle": 2})
+            cfg = os.path.join(d, "worker.json"); _write_json(cfg, {"enableNetwork": True})
             af = os.path.join(d, "af"); os.makedirs(af)
-            open(os.path.join(af, "AF-G6AGY4-F1-model_v6.pdb"), "w").write(
+            _write_text(os.path.join(af, "AF-G6AGY4-F1-model_v6.pdb"),
                 "ATOM      1  CA  MET A   1      11.000  22.000  33.000  1.00 87.50           C\nEND\n")
             assets = os.path.join(d, "assets"); os.makedirs(assets)
-            open(os.path.join(assets, "3Dmol-min.js"), "w").write("/* vendored */")
+            _write_text(os.path.join(assets, "3Dmol-min.js"), "/* vendored */")
             out = os.path.join(d, "dashboard.html")
             gd.main(["--db", db, "--rotation", rot, "--config", cfg,
                      "--alphafold-cache", af, "--assets-dir", assets, "--out", out])
-            html_doc = open(out).read()
+            html_doc = _read_text(out)
             self.assertIn('src="assets/3Dmol-min.js"', html_doc)   # vendored script referenced
             self.assertIn("87.50", html_doc)                        # PDB embedded (b-factor/pLDDT)
             self.assertIn("colorscheme", html_doc.lower())          # pLDDT (b-factor) coloring in viewer init
@@ -93,21 +111,21 @@ class DashboardTests(unittest.TestCase):
         # still blocks a literal </pre> (or any tag) from breaking out.
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "ledger.db"); _seed_db(db)
-            rot = os.path.join(d, "rotation.json"); json.dump({"cycle": 2}, open(rot, "w"))
-            cfg = os.path.join(d, "worker.json"); json.dump({"enableNetwork": True}, open(cfg, "w"))
+            rot = os.path.join(d, "rotation.json"); _write_json(rot, {"cycle": 2})
+            cfg = os.path.join(d, "worker.json"); _write_json(cfg, {"enableNetwork": True})
             af = os.path.join(d, "af"); os.makedirs(af)
             pdb_text = (
                 "ATOM      1  O5' MET A   1      11.000  22.000  33.000  1.00 87.50           O\n"
                 "REMARK   A & B <tag> O5' </pre></script><script>alert(1)</script>\n"
                 "END\n"
             )
-            open(os.path.join(af, "AF-G6AGY4-F1-model_v6.pdb"), "w").write(pdb_text)
+            _write_text(os.path.join(af, "AF-G6AGY4-F1-model_v6.pdb"), pdb_text)
             assets = os.path.join(d, "assets"); os.makedirs(assets)
-            open(os.path.join(assets, "3Dmol-min.js"), "w").write("/* vendored */")
+            _write_text(os.path.join(assets, "3Dmol-min.js"), "/* vendored */")
             out = os.path.join(d, "dashboard.html")
             gd.main(["--db", db, "--rotation", rot, "--config", cfg,
                      "--alphafold-cache", af, "--assets-dir", assets, "--out", out])
-            doc = open(out).read()
+            doc = _read_text(out)
 
             # 1. container is <pre hidden ...>, NOT <script ...> (fails against
             #    the old <script type="text/plain"> container -- see counterfactual
@@ -170,6 +188,15 @@ class DashboardTests(unittest.TestCase):
             last_x, _, last_w, _ = (float(v) for v in rects[-1])
             self.assertLessEqual(last_x + last_w, view_w)
 
+    def test_chart_includes_zero_result_cycles_from_rotation(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "ledger.db"); _seed_db(db)
+            doc = _generate(d, db, cycle=4)
+            self.assertIn("cycle 1: 1", doc)
+            self.assertIn("cycle 2: 1", doc)
+            self.assertIn("cycle 3: 0", doc)
+            self.assertIn("cycle 4: 0", doc)
+
     def test_viewer_selection_uses_score_not_recency(self):
         # Regression guard for Fix 4: viewer candidates must come from
         # top_by_score(), so a higher-scored-but-older discovery still wins
@@ -183,9 +210,9 @@ class DashboardTests(unittest.TestCase):
             _make_db(db, rows)
             af = os.path.join(d, "af"); os.makedirs(af)
             for acc in ("OLDLOW", "NEWHI"):
-                open(os.path.join(af, f"AF-{acc}-F1-model_v6.pdb"), "w").write(_pdb_text())
+                _write_text(os.path.join(af, f"AF-{acc}-F1-model_v6.pdb"), _pdb_text())
             assets = os.path.join(d, "assets"); os.makedirs(assets)
-            open(os.path.join(assets, "3Dmol-min.js"), "w").write("/* vendored */")
+            _write_text(os.path.join(assets, "3Dmol-min.js"), "/* vendored */")
             doc = _generate(d, db, cycle=2, enable_network=True, af=af, assets=assets)
 
             m = re.search(r'<div class="card"><div class="id">([^<]+)</div><div id="(viewer\d+)"', doc)
@@ -203,9 +230,9 @@ class DashboardTests(unittest.TestCase):
             _make_db(db, rows)
             af = os.path.join(d, "af"); os.makedirs(af)
             # an unrelated cached structure a naive glob would incorrectly match
-            open(os.path.join(af, "AF-UNRELATED-F1-model_v6.pdb"), "w").write(_pdb_text())
+            _write_text(os.path.join(af, "AF-UNRELATED-F1-model_v6.pdb"), _pdb_text())
             assets = os.path.join(d, "assets"); os.makedirs(assets)
-            open(os.path.join(assets, "3Dmol-min.js"), "w").write("/* vendored */")
+            _write_text(os.path.join(assets, "3Dmol-min.js"), "/* vendored */")
             doc = _generate(d, db, cycle=1, enable_network=True, af=af, assets=assets)
 
             self.assertNotIn('id="viewer0"', doc)   # no viewer rendered for the crafted accession
@@ -221,6 +248,62 @@ class DashboardTests(unittest.TestCase):
             doc = _generate(d, db, cycle=1)
             self.assertIn("0.878", doc)          # rounded to 3 decimals
             self.assertNotIn("0.8779999", doc)   # raw float must not leak through
+
+    def test_simulation_summary_and_generated_structure_are_visible(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "ledger.db"); _seed_db(db)
+            runs = os.path.join(d, "runs")
+            sim = os.path.join(runs, "cycle_1_x", "sim")
+            structure_dir = os.path.join(sim, "candidates", "G6AGY4", "esmfold")
+            os.makedirs(structure_dir, exist_ok=True)
+            _write_text(os.path.join(structure_dir, "generated.pdb"), _pdb_text())
+            _write_json(os.path.join(sim, "summary.json"), {
+                "ran": 2, "failed": 0,
+                "backends": {"mmseqs": {"available": True, "reason": "found"},
+                             "vina": {"available": False, "reason": "not installed"}},
+                "resources": {"maxConcurrentObserved": 2, "logicalCpuCount": 15,
+                              "peakEstimatedRamBytes": 1024, "ramBudgetBytes": 4096},
+            })
+            assets = os.path.join(d, "assets"); os.makedirs(assets)
+            _write_text(os.path.join(assets, "3Dmol-min.js"), "/* vendored */")
+            doc = _generate(d, db, cycle=1, assets=assets, runs=runs)
+            self.assertIn("Simulation backends / resource use", doc)
+            self.assertIn("max concurrent=2/15", doc)
+            self.assertIn("not installed", doc)
+            self.assertIn("87.50", doc)
+
+    def test_relaxed_structure_pose_metrics_and_png_export_are_rendered(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "ledger.db"); _seed_db(db)
+            runs = os.path.join(d, "runs")
+            candidate = os.path.join(runs, "cycle_1_x", "sim", "candidates", "G6AGY4")
+            os.makedirs(os.path.join(candidate, "openmm"), exist_ok=True)
+            os.makedirs(os.path.join(candidate, "vina"), exist_ok=True)
+            relaxed = os.path.join(candidate, "openmm", "relaxed.pdb")
+            pose = os.path.join(candidate, "vina", "pose.pdbqt")
+            _write_text(relaxed, _pdb_text())
+            _write_text(pose, "MODEL 1\nREMARK VINA RESULT: -7.5 0 0\nENDMDL\n")
+            _write_json(os.path.join(candidate, "structure_evidence.json"), {
+                "structureInput": {"source": "alphafold-cache"},
+                "relaxedStructure": relaxed, "dockingPose": pose,
+                "realizedComputeValue": 0.9,
+                "openmm": {"energyDropKJPerMol": 1234.5},
+                "vina": {"bestAffinityKcalPerMol": -7.5, "ligand": {"name": "Penicillin G"}},
+            })
+            _write_json(os.path.join(runs, "cycle_1_x", "sim", "summary.json"), {
+                "ran": 2, "failed": 0, "backends": {}, "resources": {}})
+            assets = os.path.join(d, "assets"); os.makedirs(assets)
+            _write_text(os.path.join(assets, "3Dmol-min.js"), "/* vendored */")
+            doc = _generate(d, db, cycle=1, assets=assets, runs=runs)
+            self.assertIn('addModel(pose,"pdbqt")', doc)
+            self.assertIn("Penicillin G", doc)
+            self.assertIn("Vina=-7.50 kcal/mol", doc)
+            self.assertIn("ΔE=1234.5 kJ/mol", doc)
+            self.assertIn("Export PNG", doc)
+            self.assertIn("pngURI()", doc)
+            self.assertIn("Docking site", doc)
+            self.assertIn("Full protein", doc)
+            self.assertIn('location.hash==="#docking-site"', doc)
 
 
 if __name__ == "__main__":

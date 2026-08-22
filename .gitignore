@@ -25,11 +25,18 @@ discoveries/ledger.db
 discoveries/ledger.db-wal
 discoveries/ledger.db-shm
 discoveries/DISCOVERIES.md
-discoveries/assets/
+discoveries/assets/*
+!discoveries/assets/3Dmol-min.js
+!discoveries/assets/3Dmol-LICENSE.txt
 logs/*.log
-runs/cycle_*/
+# All new run products are local-only. Already-tracked historical examples stay
+# tracked by Git, while future audit/custom run IDs cannot be added accidentally.
+runs/*/
 discoveries/*.tmp
 discoveries/dashboard.html
+
+# --- Optional Pfam profile database (re-downloadable, ~3 GB) ---
+data/pfam/
 
 # --- Bundled tool binaries (re-downloadable, kept on disk) ---
 tools/**/*.tar.gz

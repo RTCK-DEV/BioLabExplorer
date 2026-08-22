@@ -30,7 +30,7 @@ python3 -c "import json,sys; d=json.load(open('$SUM')); sys.exit(0 if d['ran']==
 ls "$S/state/inbox/processed/"*b.fasta >/dev/null 2>&1 || { echo "FAIL: cycle did not complete"; exit 1; }
 
 # 3) enableSimulation=true with a stub backend -> at least one job ran
-S="$(sandbox true)"; printf '#!/bin/sh\nexit 0\n' > "$S/bin/mmseqs"; chmod +x "$S/bin/mmseqs"
+S="$(sandbox true)"; printf '#!/bin/sh\nprintf "hit\\n" > "$4"\n' > "$S/bin/mmseqs"; chmod +x "$S/bin/mmseqs"
 printf '>TESTACC1\nMKTAYIAKQR\n' > "$S/state/inbox/b.fasta"; run "$S"
 SUM="$(find "$S/runs" -name summary.json | head -1)"
 python3 -c "import json,sys; d=json.load(open('$SUM')); sys.exit(0 if d['ran']>=1 else 1)" \

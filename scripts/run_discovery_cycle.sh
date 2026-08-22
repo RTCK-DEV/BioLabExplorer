@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+exec 3>&1 4>&2
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
@@ -11,6 +12,20 @@ DISCOVERIES_DIR="${DISCOVERIES_DIR:-${ROOT_DIR}/discoveries}"
 REFERENCE="${REFERENCE:-${ROOT_DIR}/data/curated_reference/pbp_pks_reference.fasta}"
 LOG_DIR="${LOG_DIR:-${ROOT_DIR}/logs}"
 NOTIFY_CMD="${NOTIFY_CMD:-}"
+ALLOW_NETWORK="${ALLOW_NETWORK:-0}"
+BUDGET_OVERRIDE=""
+DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --allow-network) ALLOW_NETWORK=1 ;;
+    --budget-seconds)
+      shift; [[ $# -gt 0 && "$1" =~ ^[1-9][0-9]*$ ]] || { echo "--budget-seconds requires a positive integer" >&2; exit 2; }
+      BUDGET_OVERRIDE="$1" ;;
+    --dry-run) DRY_RUN=1 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
 if [[ -z "${PIPELINE_CMD:-}" ]]; then
   if [[ -x "${ROOT_DIR}/.build/release/BioLabExplorerPipeline" ]]; then
     PIPELINE_CMD="${ROOT_DIR}/.build/release/BioLabExplorerPipeline"
@@ -23,8 +38,32 @@ INBOX="${STATE_DIR}/inbox"; PROCESSED="${INBOX}/processed"
 ROTATION="${STATE_DIR}/rotation.json"; LOCK_DIR="${STATE_DIR}/.lock"
 LEDGER_DB="${DISCOVERIES_DIR}/ledger.db"; DISCOVERIES_MD="${DISCOVERIES_DIR}/DISCOVERIES.md"
 
-log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
-cfg() { python3 -c "import json;print(json.load(open('${CONFIG}')).get('$1','$2'))"; }
+log() {
+  # Declared first: assigning in the declaration would mask date's exit status.
+  local message
+  message="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
+  echo "${message}"
+  if [[ -n "${CYCLE_LOG:-}" ]]; then echo "${message}" >&3; fi
+}
+# Reads one worker-config key. Values written as "auto" are resolved from the
+# running host by scripts/host_profile.py, so the checked-in config is portable.
+cfg() {
+  python3 - "${CONFIG}" "$1" "$2" "${ROOT_DIR}/scripts" <<'PY'
+import json, sys, os
+sys.path.insert(0, sys.argv[4])
+with open(sys.argv[1], encoding="utf-8") as source:
+    config = json.load(source)
+try:
+    import host_profile
+    config, _ = host_profile.resolve_config(
+        config, path=os.path.dirname(os.path.abspath(sys.argv[1]))
+    )
+except Exception as exc:  # noqa: BLE001 - config reads must never crash the cycle
+    print(f"cfg: host profile unavailable, using raw config: {exc}", file=sys.stderr)
+print(config.get(sys.argv[2], sys.argv[3]))
+PY
+}
+CYCLE_STARTED_EPOCH="$(date +%s)"
 
 # ---------- bound the daemon's launchd-appended logs (runs on EVERY invocation, incl. no-op) ----------
 # launchd's StandardOutPath/StandardErrorPath append on every relaunch under KeepAlive; nothing else
@@ -44,17 +83,21 @@ rotate_daemon_log "${LOG_DIR}/daemon.err.log"
 if [[ -f "${STATE_DIR}/STOP" ]]; then log "STOP present -> graceful stop"; exit 0; fi
 if [[ -f "${STATE_DIR}/PAUSED" ]]; then log "PAUSED (circuit breaker) -> no-op; resume via scripts/discovery_agent.sh resume"; exit 0; fi
 if [[ ! -s "${REFERENCE}" ]]; then log "missing reference: ${REFERENCE}"; exit 2; fi
+BUDGET_SECONDS="${BUDGET_OVERRIDE:-$(cfg budgetSeconds 21600)}"
+[[ "${BUDGET_SECONDS}" =~ ^[1-9][0-9]*$ ]] || { log "invalid budgetSeconds=${BUDGET_SECONDS}"; exit 2; }
 
 DISK_FLOOR_GB="$(cfg diskFloorGB 10)"
-FREE_GB="$(df -g "${ROOT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
-if [[ -n "${FREE_GB}" && "${FREE_GB}" -lt "${DISK_FLOOR_GB}" ]]; then
+FREE_GB="$(df -g "${ROOT_DIR}" | awk 'NR==2 {print $4}')" || { log "disk capacity probe failed"; exit 2; }
+[[ "${FREE_GB}" =~ ^[0-9]+$ ]] || { log "disk capacity probe returned invalid value: ${FREE_GB:-empty}"; exit 2; }
+if [[ "${FREE_GB}" -lt "${DISK_FLOOR_GB}" ]]; then
   log "disk free ${FREE_GB}GB < floor ${DISK_FLOOR_GB}GB -> pause"; exit 0
 fi
 
 MAX_WS_BYTES="$(cfg maxWorkspaceBytes 21474836480)"
 if [[ -d "${RUNS_DIR}" ]]; then
-  USED_KB="$(du -sk "${RUNS_DIR}" 2>/dev/null | awk '{print $1}' || true)"
-  if [[ -n "${USED_KB:-}" && $(( USED_KB * 1024 )) -ge "${MAX_WS_BYTES}" ]]; then
+  USED_KB="$(du -sk "${RUNS_DIR}" | awk '{print $1}')" || { log "workspace quota probe failed"; exit 2; }
+  [[ "${USED_KB}" =~ ^[0-9]+$ ]] || { log "workspace quota probe returned invalid value"; exit 2; }
+  if [[ $(( USED_KB * 1024 )) -ge "${MAX_WS_BYTES}" ]]; then
     log "workspace ${USED_KB}KB >= quota -> pause (prune runs/ manually)"; exit 0
   fi
 fi
@@ -63,9 +106,19 @@ MANIFEST="$(dirname "${CONFIG}")/approved_manifest.json"
 
 # batch present? (nullglob array; no error-hiding find|head)
 shopt -s nullglob; batches=("${INBOX}"/*.fasta); shopt -u nullglob
+if [[ "${DRY_RUN}" == "1" ]]; then
+  if [[ ${#batches[@]} -gt 0 ]]; then batch_name="$(basename "${batches[0]}")"; else batch_name="none"; fi
+  log "dry-run OK: batch=${batch_name} budgetSeconds=${BUDGET_SECONDS} networkAuthorized=${ALLOW_NETWORK}"
+  python3 "${ROOT_DIR}/scripts/sim_queue.py" run --help >/dev/null
+  exit 0
+fi
 if [[ ${#batches[@]} -eq 0 ]]; then
   ENABLE_NET="$(cfg enableNetwork false 2>/dev/null || echo false)"
   if [[ "${ENABLE_NET}" == "True" || "${ENABLE_NET}" == "true" ]]; then
+    if [[ "${ALLOW_NETWORK}" != "1" ]]; then
+      log "network enabled in config but this invocation lacks --allow-network/ALLOW_NETWORK=1 -> no-op"
+      exit 0
+    fi
     # network refill is FAIL-CLOSED: require an approved manifest matching BOTH the
     # curated reference and the approved query set before any fetch.
     QR="$(dirname "${CONFIG}")/query_rotation.json"
@@ -74,13 +127,34 @@ if [[ ${#batches[@]} -eq 0 ]]; then
 import hashlib, json, sys
 man = json.load(open(sys.argv[1]))
 def d(p): return "sha256:" + hashlib.sha256(open(p, "rb").read()).hexdigest()
-ok = man.get("referenceSha256") == d(sys.argv[2]) and man.get("querySetDigest") == d(sys.argv[3])
+required_exclusions = {"virulence factors", "toxin biosynthesis gene clusters", "select-agent homologs"}
+reviewer = str(man.get("reviewer", "")).strip().lower()
+reviewed_date = str(man.get("reviewedDate", "")).strip()
+exclusions = {str(value).strip().lower() for value in man.get("exclusions", [])}
+ok = (
+    man.get("referenceSha256") == d(sys.argv[2])
+    and man.get("querySetDigest") == d(sys.argv[3])
+    and reviewer not in ("", "unset")
+    and len(reviewed_date) == 10
+    and required_exclusions.issubset(exclusions)
+)
 sys.exit(0 if ok else 1)
 PY
     mkdir -p "${INBOX}"
     log "inbox empty + network enabled -> fetching UniProt page"
-    python3 "${ROOT_DIR}/scripts/fetch_uniprot.py" --config "${CONFIG}" \
-      --query-rotation "${QR}" --rotation "${ROTATION}" --inbox "${INBOX}" || { log "fetch failed"; exit 4; }
+    if ALLOW_NETWORK="${ALLOW_NETWORK}" python3 "${ROOT_DIR}/scripts/fetch_uniprot.py" --config "${CONFIG}" \
+      --query-rotation "${QR}" --rotation "${ROTATION}" --inbox "${INBOX}"; then
+      FETCH_RC=0
+    else
+      FETCH_RC=$?
+    fi
+    if [[ "${FETCH_RC}" -eq 75 ]]; then
+      log "temporary network failure -> soft no-op; cursor unchanged"
+      exit 0
+    elif [[ "${FETCH_RC}" -ne 0 ]]; then
+      log "network fetch contract failed rc=${FETCH_RC} -> abort"
+      exit "${FETCH_RC}"
+    fi
     shopt -s nullglob; batches=("${INBOX}"/*.fasta); shopt -u nullglob
   fi
   if [[ ${#batches[@]} -eq 0 ]]; then log "inbox empty -> no-op"; exit 0; fi
@@ -126,8 +200,11 @@ CYCLE="$(python3 - "${ROTATION}" <<'PY'
 import json, os, sys
 p = sys.argv[1]; c = 0
 if os.path.exists(p):
-    try: c = int(json.load(open(p)).get("cycle", 0))
-    except Exception: c = 0
+    try:
+        with open(p, encoding="utf-8") as source:
+            c = int(json.load(source).get("cycle", 0))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"invalid rotation state {p}: {error}")
 print(c + 1)
 PY
 )"
@@ -135,7 +212,9 @@ MAX_CAND="$(cfg maxCandidates 20)"
 TS="$(date -u +%Y%m%d_%H%M%S)"
 RUN_DIR="$(mktemp -d "${RUNS_DIR}/cycle_${TS}_XXXXXX")"
 RUN_ID="$(basename "${RUN_DIR}")"
+CYCLE_LOG="${LOG_DIR}/cycle-${TS}-${RUN_ID}.log"
 touch "${RUN_DIR}/.in_progress"
+exec >>"${CYCLE_LOG}" 2>&1
 
 FAILCOUNT_FILE="${STATE_DIR}/consecutive_failures"
 MAX_FAILS="$(cfg maxConsecutiveFailures 5)"
@@ -146,7 +225,11 @@ finish() {
     date -u +"%Y-%m-%dT%H:%M:%SZ" > "${RUN_DIR}/.complete"
     rm -f "${FAILCOUNT_FILE}"
   else
-    echo "status=${status}" > "${RUN_DIR}/.failed"
+    {
+      echo "status=${status}"
+      echo "failed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      echo "log=${CYCLE_LOG}"
+    } > "${RUN_DIR}/.failed"
     local n; n="$(cat "${FAILCOUNT_FILE}" 2>/dev/null || echo 0)"; n=$((n + 1))
     echo "${n}" > "${FAILCOUNT_FILE}"
     if [[ "${n}" -ge "${MAX_FAILS}" ]]; then
@@ -158,7 +241,7 @@ finish() {
 }
 trap finish EXIT
 
-log "cycle=${CYCLE} run=${RUN_ID} batch=$(basename "${BATCH}")"
+log "cycle=${CYCLE} run=${RUN_ID} batch=$(basename "${BATCH}") log=${CYCLE_LOG}"
 
 # discovery (existing pipeline; NO --require-discovery so empty == success)
 ${PIPELINE_CMD} --input "${BATCH}" --reference "${REFERENCE}" --output "${RUN_DIR}" --max "${MAX_CAND}"
@@ -169,31 +252,6 @@ NEW="$(python3 "${ROOT_DIR}/scripts/discovery_db.py" record \
   --discoveries "${DISCOVERIES_MD}" --cycle "${CYCLE}" --run-id "${RUN_ID}")"
 log "new_actionable=${NEW}"
 
-# non-overwriting archival of the consumed batch
-DEST="${PROCESSED}/${RUN_ID}__$(basename "${BATCH}")"
-[[ -e "${DEST}" ]] && { log "processed dest exists: ${DEST}"; exit 2; }
-mv "${BATCH}" "${DEST}"
-
-# atomic rotation advance (forward-compatible keys)
-python3 - "${ROTATION}" "${CYCLE}" "${RUN_ID}" <<'PY'
-import json, os, sys, tempfile
-p, cycle, run_id = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-data = {}
-if os.path.exists(p):
-    try: data = json.load(open(p))
-    except Exception: data = {}
-data.update({"schemaVersion": 1, "cycle": cycle, "updatedCycle": cycle, "lastRunId": run_id})
-fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p) or ".", suffix=".tmp")
-with os.fdopen(fd, "w") as fh: json.dump(data, fh)
-os.replace(tmp, p)
-PY
-
-# local-only notification
-if [[ "${NEW}" -gt 0 ]]; then
-  if [[ -n "${NOTIFY_CMD}" ]]; then "${NOTIFY_CMD}" "${NEW} new candidate(s), cycle ${CYCLE}" || true
-  else osascript -e "display notification \"${NEW} new candidate(s), cycle ${CYCLE}\" with title \"BioLab Discovery\"" 2>/dev/null || true; fi
-fi
-
 # prune worker-owned logs only (never runs/; AGENTS.md non-destructive elsewhere)
 MAX_LOG_FILES="$(cfg maxLogFiles 200)"
 shopt -s nullglob; logs=("${LOG_DIR}"/cycle-*.log); shopt -u nullglob
@@ -201,25 +259,71 @@ if [[ ${#logs[@]} -gt ${MAX_LOG_FILES} ]]; then
   ls -1t "${LOG_DIR}"/cycle-*.log | tail -n +$((MAX_LOG_FILES + 1)) | while read -r f; do rm -f "$f"; done
 fi
 
-# optional simulation stack (opt-in; never fail the cycle over simulation)
+# Optional scientific backends degrade per job, but queue/contract failures fail
+# the cycle before the input batch is archived and rotation is committed.
 ENABLE_SIM="$(cfg enableSimulation false 2>/dev/null || echo false)"
 if [[ "${ENABLE_SIM}" == "True" || "${ENABLE_SIM}" == "true" ]]; then
   CAND_JSON="${RUN_DIR}/sim_candidates.json"
-  if python3 "${ROOT_DIR}/scripts/discovery_db.py" export-new-actionable \
-       --db "${LEDGER_DB}" --cycle "${CYCLE}" --out "${CAND_JSON}" >/dev/null 2>&1; then
+  python3 "${ROOT_DIR}/scripts/discovery_db.py" export-new-actionable \
+    --db "${LEDGER_DB}" --cycle "${CYCLE}" --out "${CAND_JSON}" \
+    >"${RUN_DIR}/simulation-export.log" 2>&1 || {
+      log "simulation candidate export failed; see ${RUN_DIR}/simulation-export.log"; exit 5;
+    }
+  ELAPSED=$(( $(date +%s) - CYCLE_STARTED_EPOCH ))
+  REMAINING=$(( BUDGET_SECONDS - ELAPSED ))
+  if [[ "${REMAINING}" -gt 0 ]]; then
+    mkdir -p "${RUN_DIR}/sim"
     python3 "${ROOT_DIR}/scripts/sim_queue.py" run --candidates "${CAND_JSON}" \
-      --run-dir "${RUN_DIR}" --config "${CONFIG}" >/dev/null 2>&1 \
-      || log "simulation queue skipped (non-fatal)"
+      --run-dir "${RUN_DIR}" --config "${CONFIG}" --reference "${REFERENCE}" \
+      --budget-seconds "${REMAINING}" >"${RUN_DIR}/sim/queue.log" 2>&1 || {
+        log "simulation queue infrastructure failed; see ${RUN_DIR}/sim/queue.log"; exit 5;
+      }
   else
-    log "simulation candidate export skipped (non-fatal)"
+    log "cycle budget exhausted before simulation; no new simulation jobs admitted"
   fi
 fi
 
-# regenerate the self-contained dashboard (never fail the cycle over visualization)
+# Build the prospective rotation state first. Dashboard generation uses it so
+# the published stats and the subsequently committed cursor are byte-consistent.
+NEXT_ROTATION="${RUN_DIR}/rotation.next.json"
+python3 - "${ROTATION}" "${NEXT_ROTATION}" "${CYCLE}" "${RUN_ID}" <<'PY'
+import json, os, sys, tempfile
+p, out, cycle, run_id = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+data = {}
+if os.path.exists(p):
+    with open(p, encoding="utf-8") as source:
+        data = json.load(source)
+data.update({"schemaVersion": 1, "cycle": cycle, "updatedCycle": cycle, "lastRunId": run_id})
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(out) or ".", suffix=".tmp")
+with os.fdopen(fd, "w", encoding="utf-8") as fh:
+    json.dump(data, fh)
+os.replace(tmp, out)
+PY
+
+# Regenerate the dashboard. This is stdlib-only and required by M4, so an actual
+# generator failure is a cycle failure rather than a silently missing product.
 ALPHAFOLD_CACHE="${ALPHAFOLD_CACHE:-${ROOT_DIR}/data/alphafold_cache}"
 python3 "${ROOT_DIR}/scripts/generate_dashboard.py" \
-  --db "${LEDGER_DB}" --rotation "${ROTATION}" --config "${CONFIG}" \
+  --db "${LEDGER_DB}" --rotation "${NEXT_ROTATION}" --config "${CONFIG}" \
   --alphafold-cache "${ALPHAFOLD_CACHE}" --assets-dir "${DISCOVERIES_DIR}/assets" \
-  --out "${DISCOVERIES_DIR}/dashboard.html" >/dev/null 2>&1 || log "dashboard generation skipped (non-fatal)"
+  --runs-dir "${RUNS_DIR}" \
+  --out "${DISCOVERIES_DIR}/dashboard.html" >"${RUN_DIR}/dashboard.log" 2>&1 || {
+    log "dashboard generation failed; see ${RUN_DIR}/dashboard.log"; exit 6;
+  }
+
+# Commit only after required post-processing infrastructure has succeeded. The
+# rotation is committed before archival: a crash in the tiny gap causes at most
+# one deduplicated replay, never a permanently unaccounted consumed batch.
+mkdir -p "$(dirname "${ROTATION}")"
+mv "${NEXT_ROTATION}" "${ROTATION}"
+DEST="${PROCESSED}/${RUN_ID}__$(basename "${BATCH}")"
+[[ -e "${DEST}" ]] && { log "processed dest exists: ${DEST}"; exit 2; }
+mv "${BATCH}" "${DEST}"
+
+# local-only notification after durable commit
+if [[ "${NEW}" -gt 0 ]]; then
+  if [[ -n "${NOTIFY_CMD}" ]]; then "${NOTIFY_CMD}" "${NEW} new candidate(s), cycle ${CYCLE}" || log "local notification command failed"
+  else osascript -e "display notification \"${NEW} new candidate(s), cycle ${CYCLE}\" with title \"BioLab Discovery\"" 2>/dev/null || log "local notification unavailable"; fi
+fi
 
 log "cycle ${CYCLE} complete"

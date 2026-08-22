@@ -3,16 +3,41 @@ import Foundation
 public enum SequenceClusterer {
     public static func applyKmerClusterSizes(to proteins: [ProteinSequence], threshold: Double = 0.38) -> [ProteinSequence] {
         guard !proteins.isEmpty else { return [] }
+        // Preserve the exact all-pairs Jaccard contract at public boundary
+        // values without materialising O(n²) pairs.
+        if threshold <= 0 {
+            return proteins.map { $0.with(clusterSize: proteins.count) }
+        }
+        if threshold.isNaN || threshold > 1 {
+            return proteins.map { $0.with(clusterSize: 1) }
+        }
         let signatures = proteins.map { kmerSet($0.sequence, k: 3) }
         var clusterSizes = Array(repeating: 1, count: proteins.count)
+        var postings: [String: [Int]] = [:]
+        postings.reserveCapacity(min(65_536, signatures.reduce(0) { $0 + $1.count }))
+        for (proteinIndex, signature) in signatures.enumerated() {
+            for kmer in signature {
+                postings[kmer, default: []].append(proteinIndex)
+            }
+        }
 
-        for left in proteins.indices {
-            for right in proteins.indices where right > left {
-                let similarity = jaccard(signatures[left], signatures[right])
-                if similarity >= threshold {
-                    clusterSizes[left] += 1
-                    clusterSizes[right] += 1
+        // Count intersections while traversing the inverted index. This avoids
+        // allocating new intersection/union Sets for every candidate pair.
+        var sharedKmerCounts: [ClusterPair: Int] = [:]
+        for indices in postings.values where indices.count > 1 {
+            for leftPosition in indices.indices {
+                for rightPosition in indices.indices where rightPosition > leftPosition {
+                    let pair = ClusterPair(indices[leftPosition], indices[rightPosition])
+                    sharedKmerCounts[pair, default: 0] += 1
                 }
+            }
+        }
+        for (pair, intersectionCount) in sharedKmerCounts {
+            let unionCount = signatures[pair.left].count + signatures[pair.right].count - intersectionCount
+            let similarity = unionCount == 0 ? 0 : Double(intersectionCount) / Double(unionCount)
+            if similarity >= threshold {
+                clusterSizes[pair.left] += 1
+                clusterSizes[pair.right] += 1
             }
         }
 
@@ -31,11 +56,15 @@ public enum SequenceClusterer {
         return kmers
     }
 
-    private static func jaccard(_ left: Set<String>, _ right: Set<String>) -> Double {
-        guard !left.isEmpty || !right.isEmpty else { return 0 }
-        let intersection = left.intersection(right).count
-        let union = left.union(right).count
-        return Double(intersection) / Double(union)
+}
+
+private struct ClusterPair: Hashable {
+    let left: Int
+    let right: Int
+
+    init(_ first: Int, _ second: Int) {
+        left = min(first, second)
+        right = max(first, second)
     }
 }
 

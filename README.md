@@ -131,6 +131,10 @@ selected candidate on the right.
 Long work — reference search, hmmscan, a local model — runs off the main thread,
 so the window stays responsive.
 
+Tool detection does not rely on your shell: an app launched from Finder inherits
+launchd's `PATH`, so the Homebrew and MacPorts prefixes are searched explicitly
+after `SIM_BIN_DIR` and `PATH`. Tools you have installed show up as installed.
+
 ## Optional evidence
 
 ### Pfam domains
@@ -213,9 +217,12 @@ different order every run, and floating-point addition is not associative.
 `shannonEntropy` did exactly that and drifted by one ULP, which propagated into
 `confidenceScore`. Sort before you sum.
 
-OpenMM runs single-threaded (`openmmCpuThreads: 1`) and Vina uses a fixed seed,
-for the same reason: two runs of the same input should produce byte-identical
-structures.
+The same applies to the optional structure chain. OpenMM's CPU platform sums
+forces per thread and reduces them in completion order, so it is pinned to one
+thread (`openmmCpuThreads: 1`) and Vina uses a fixed seed: two runs of the same
+input produce byte-identical structures. Every relaxation records
+`bitReproducible`, which is false the moment you raise the thread count for
+speed — the guarantee is stated per run, not assumed.
 
 ## Reports
 
@@ -408,6 +415,18 @@ ESMFold → OpenMM → Vina: 655.97 s, zero failures, 5.16 GB peak RSS, zero swa
 ESMFold took 596.72 s on MPS (mean pLDDT 94.59); OpenMM reduced potential energy
 by 55,690.39 kJ/mol; Vina used 15 threads and reported a fixed-seed best pose of
 −8.317 kcal/mol. Folding, relaxation and docking input digests all matched.
+
+**Where the evidence lives** — every figure above comes from a run directory
+that stays local: `runs/` is git-ignored, so nothing here is a number you have
+to take on trust from a README alone, and nothing here bloats the repository.
+The CPU-split comparison is `runs/swissprot_full200_20260715` and
+`runs/swissprot_full200_weighted_20260715` (about 345 MB each, almost entirely
+raw MMseqs2 and HMMER result rows); the structure chain is
+`runs/a0a062tnk1_full_chain_20260715` and `runs/structure_chain_*_20260715`;
+the release audit is `runs/perfect_release_20260715` and
+`runs/release_audit_20260715`. Regenerating them is a matter of re-running the
+commands above with the same inputs, so they are safe to delete if you need the
+disk back.
 
 **Reproducibility** — a 40-residue fixture produced byte-identical ESMFold PDBs
 across two MPS runs. For `G6AGY4` (842 residues), two OpenMM → Vina runs produced

@@ -118,6 +118,8 @@ func runChecks() throws {
     try check(statuses.count == 1, "tool probe must keep all configured tools")
     try check(!statuses[0].isAvailable, "missing tool must be reported unavailable")
 
+    try runToolResolutionChecks()
+
     let fasta = """
     >tr|A0A_TEST1|A0A_TEST1_ENV Uncharacterized protein OS=Test organism OX=1
     MTPKIVLAGHGVCPTCGDGVKALAEQGFDVVAVHGHADLPEEVVRQLGADPVVVINGGAGGLGQALAAHLRER
@@ -494,6 +496,22 @@ func runLocalSummaryChecks(run: DiscoveryRun) throws {
     let models = LocalSummaryAdapter.parseModelList(listing)
     try check(models == ["llama3.2:latest", "qwen2.5-coder:7b"], "model listing parsed wrong: \(models)")
     try check(LocalSummaryAdapter.parseModelList("").isEmpty, "empty listing must parse to no models")
+
+    // Columns may be tab separated; splitting on spaces alone returned the
+    // first three columns glued together as a "model name".
+    let tabbed = "NAME\tID\tSIZE\tMODIFIED\nllama3.2:latest\tabc123\t2.0 GB\t3 days ago"
+    try check(
+        LocalSummaryAdapter.parseModelList(tabbed) == ["llama3.2:latest"],
+        "tab-separated listings must parse: \(LocalSummaryAdapter.parseModelList(tabbed))"
+    )
+    try check(
+        LocalSummaryAdapter.matches(model: "llama3.2", in: LocalSummaryAdapter.parseModelList(tabbed)),
+        "a bare name must match the :latest tag parsed from a tabbed listing"
+    )
+    try check(
+        LocalSummaryAdapter.parseModelList("NAME\n\n   \nmodel-a  x\n") == ["model-a"],
+        "blank lines must be skipped"
+    )
     try check(
         LocalSummaryAdapter.matches(model: "llama3.2", in: models),
         "a bare model name must match the :latest tag"
@@ -501,6 +519,14 @@ func runLocalSummaryChecks(run: DiscoveryRun) throws {
     try check(
         LocalSummaryAdapter.matches(model: "qwen2.5-coder:7b", in: models),
         "an exact tagged name must match"
+    )
+    try check(
+        !LocalSummaryAdapter.matches(model: "qwen2.5-coder", in: models),
+        "a bare name must NOT match a different tag; ollama would download :latest"
+    )
+    try check(
+        !LocalSummaryAdapter.matches(model: "llama3.2", in: ["llama3.2:1b"]),
+        "only :1b installed must not count as llama3.2 being available"
     )
     try check(
         !LocalSummaryAdapter.matches(model: "mistral", in: models),
@@ -518,6 +544,53 @@ func runLocalSummaryChecks(run: DiscoveryRun) throws {
         try check(prompt.contains(top.sequence.id), "prompt must include the top candidate")
     }
     try check(prompt.split(whereSeparator: \.isNewline).count > 5, "prompt must include per-candidate detail")
+
+    // `ollama run` word-wraps by moving the cursor back and erasing to end of
+    // line, and emits those escapes even into a pipe. Stripping the bytes alone
+    // would leave the duplicated word behind, so the motions are applied.
+    let wrapped = "1. G6AGY4 - Novelty\u{1B}[7D\u{1B}[K\nNovelty 93%, Confidence 73%"
+    let rendered = LocalSummaryAdapter.sanitize(wrapped)
+    try check(
+        rendered == "1. G6AGY4 -\nNovelty 93%, Confidence 73%",
+        "cursor-back plus erase-line must remove the re-drawn word, got: \(rendered.debugDescription)"
+    )
+    try check(!rendered.contains("\u{1B}"), "no escape byte may survive sanitising")
+
+    try check(
+        LocalSummaryAdapter.sanitize("\u{1B}[32mgreen\u{1B}[0m text") == "green text",
+        "colour codes must be dropped without touching the text"
+    )
+    // Faithful terminal semantics: a bare carriage return moves the cursor to
+    // column 0, it does not erase. A spinner clears explicitly.
+    try check(
+        LocalSummaryAdapter.sanitize("loading\rdone") == "doneing",
+        "a bare carriage return must overwrite in place, not erase the line"
+    )
+    try check(
+        LocalSummaryAdapter.sanitize("loading\r\u{1B}[Kdone") == "done",
+        "carriage return plus erase-line must clear what a spinner drew"
+    )
+    try check(
+        LocalSummaryAdapter.sanitize("abcdef\u{1B}[3DXYZ") == "abcXYZ",
+        "cursor-back then writing must overwrite in place"
+    )
+    try check(
+        LocalSummaryAdapter.sanitize("\u{1B}]0;window title\u{07}body") == "body",
+        "OSC sequences must be dropped entirely"
+    )
+    try check(
+        LocalSummaryAdapter.sanitize("keep\u{07}me\u{08}") == "keepme",
+        "stray control bytes must be dropped"
+    )
+    try check(
+        LocalSummaryAdapter.sanitize("  padded  \n\n") == "padded",
+        "surrounding whitespace must be trimmed"
+    )
+    try check(
+        LocalSummaryAdapter.sanitize("plain text stays") == "plain text stays",
+        "text with no control bytes must pass through unchanged"
+    )
+    try check(LocalSummaryAdapter.sanitize("") == "", "empty input must stay empty")
 
     let summary = AdvisorySummary(text: "Some wording.", model: "llama3.2", backend: "ollama")
     try check(
@@ -604,4 +677,100 @@ do {
 } catch {
     fputs("\(error)\n", stderr)
     exit(1)
+}
+
+// MARK: - Tool resolution
+
+/// A GUI app launched from Finder inherits launchd's PATH, so every Homebrew or
+/// MacPorts tool used to be reported missing inside the app while a terminal
+/// run found all of them. These checks pin the search order that fixes it.
+func runToolResolutionChecks() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("BioLabExplorerToolProbe-\(UUID().uuidString)", isDirectory: true)
+    let fallbackDirectory = root.appendingPathComponent("fallback", isDirectory: true)
+    let pathDirectory = root.appendingPathComponent("onpath", isDirectory: true)
+    let simDirectory = root.appendingPathComponent("sim", isDirectory: true)
+    for directory in [fallbackDirectory, pathDirectory, simDirectory] {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    func install(_ name: String, in directory: URL) throws -> String {
+        let url = directory.appendingPathComponent(name)
+        try "#!/bin/sh\nexit 0\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url.path
+    }
+
+    let definition = ToolDefinition(
+        displayName: "Probe Target", executableName: "biolab-probe-target",
+        role: "test", installHint: "test"
+    )
+
+    // 1. Present only in a package-manager prefix, with a launchd-style PATH.
+    let fallbackPath = try install("biolab-probe-target", in: fallbackDirectory)
+    let finderLike = ToolProbe(
+        tools: [definition],
+        environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
+        fallbackDirectories: [fallbackDirectory.path]
+    ).probe()
+    try check(
+        finderLike[0].isAvailable,
+        "a tool in a package-manager prefix must be found under a Finder-style PATH"
+    )
+    try check(finderLike[0].resolvedPath == fallbackPath, "wrong path: \(finderLike[0].resolvedPath ?? "nil")")
+
+    // 2. PATH must win over the fallback list.
+    let onPath = try install("biolab-probe-target", in: pathDirectory)
+    let pathWins = ToolProbe(
+        tools: [definition],
+        environment: ["PATH": pathDirectory.path],
+        fallbackDirectories: [fallbackDirectory.path]
+    ).probe()
+    try check(pathWins[0].resolvedPath == onPath, "PATH must take precedence over the fallback prefixes")
+
+    // 3. SIM_BIN_DIR is the documented seam and must win over both.
+    let inSim = try install("biolab-probe-target", in: simDirectory)
+    let simWins = ToolProbe(
+        tools: [definition],
+        environment: ["PATH": pathDirectory.path, "SIM_BIN_DIR": simDirectory.path],
+        fallbackDirectories: [fallbackDirectory.path]
+    ).probe()
+    try check(simWins[0].resolvedPath == inSim, "SIM_BIN_DIR must take precedence over PATH")
+
+    // 4. Still absent means still reported absent.
+    let absent = ToolProbe(
+        tools: [definition],
+        environment: ["PATH": "/usr/bin:/bin"],
+        fallbackDirectories: [root.appendingPathComponent("nowhere").path]
+    ).probe()
+    try check(!absent[0].isAvailable, "a genuinely missing tool must stay unavailable")
+    try check(absent[0].resolvedPath == nil, "a missing tool must not report a path")
+
+    // 5. The environment override replaces the shipped prefixes, and an empty
+    //    value searches nothing beyond PATH.
+    let overridden = ToolProbe(
+        tools: [definition],
+        environment: [
+            "PATH": "/usr/bin:/bin",
+            ToolProbe.searchPathsEnvironmentKey: fallbackDirectory.path
+        ]
+    ).probe()
+    try check(overridden[0].resolvedPath == fallbackPath, "the search-path override must be honoured")
+
+    let suppressed = ToolProbe(
+        tools: [definition],
+        environment: ["PATH": "/usr/bin:/bin", ToolProbe.searchPathsEnvironmentKey: ""]
+    ).probe()
+    try check(
+        !suppressed[0].isAvailable,
+        "an empty search-path override must search nothing beyond PATH"
+    )
+
+    // 6. The shipped fallback list must cover both Homebrew prefixes.
+    try check(
+        ToolProbe.defaultFallbackDirectories.contains("/opt/homebrew/bin")
+            && ToolProbe.defaultFallbackDirectories.contains("/usr/local/bin"),
+        "both Homebrew prefixes must be searched"
+    )
 }

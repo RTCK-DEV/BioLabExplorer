@@ -51,6 +51,22 @@ def _restore_residue_confidence(source_path, output_path, confidence):
     return len(restored)
 
 
+def _selected_cpu_threads(simulation, requested):
+    """The thread count the running context actually holds.
+
+    Reporting the configured value would let the metrics claim
+    single-threaded while the context ran on every core, which is how the
+    reproducibility guarantee went unnoticed for so long.
+    """
+    platform = simulation.context.getPlatform()
+    if platform.getName() != "CPU":
+        return None
+    try:
+        return int(platform.getPropertyValue(simulation.context, "Threads"))
+    except Exception:  # noqa: BLE001 - metrics must never break the run
+        return requested
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
@@ -62,9 +78,14 @@ def main(argv=None):
     parser.add_argument("--precision", default="mixed", choices=("single", "mixed", "double"))
     parser.add_argument("--max-iterations", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=20260715)
+    parser.add_argument("--cpu-threads", type=int, default=1,
+                        help="OpenMM CPU platform thread count. 1 is required for "
+                             "bit-reproducible output; >1 is faster but not reproducible.")
     args = parser.parse_args(argv)
     if args.max_iterations <= 0:
         parser.error("--max-iterations must be > 0")
+    if args.cpu_threads < 1:
+        parser.error("--cpu-threads must be >= 1")
 
     from openmm import LangevinMiddleIntegrator, Platform
     from openmm.app import ForceField, Modeller, NoCutoff, PDBFile, Simulation
@@ -81,8 +102,15 @@ def main(argv=None):
     missing_terminals = sum(len(atoms) for atoms in fixer.missingTerminals.values())
     fixer.addMissingAtoms(seed=args.seed)
     forcefield = ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
+    # Pin the CPU platform's thread count before ANY context is created.
+    # OpenMM sums forces per thread and reduces them in completion order, so a
+    # multi-threaded CPU context gives a different minimum on every run. This
+    # covers addHydrogens below as well as the minimization context itself.
+    cpu_platform = Platform.getPlatformByName("CPU")
+    cpu_platform.setPropertyDefaultValue("Threads", str(args.cpu_threads))
+
     modeller = Modeller(fixer.topology, fixer.positions)
-    modeller.addHydrogens(forcefield, platform=Platform.getPlatformByName("CPU"))
+    modeller.addHydrogens(forcefield, platform=cpu_platform)
     system = forcefield.createSystem(modeller.topology, nonbondedMethod=NoCutoff)
     requested_platform = args.platform
     if requested_platform == "auto":
@@ -101,8 +129,12 @@ def main(argv=None):
             integrator = LangevinMiddleIntegrator(300 * kelvin, 1 / picosecond, 0.002 * picosecond)
             integrator.setRandomNumberSeed(args.seed)
             platform = Platform.getPlatformByName(platform_name)
-            properties = ({"Precision": args.precision}
-                          if platform_name in ("OpenCL", "CUDA") else {})
+            if platform_name in ("OpenCL", "CUDA"):
+                properties = {"Precision": args.precision}
+            elif platform_name == "CPU":
+                properties = {"Threads": str(args.cpu_threads)}
+            else:
+                properties = {}
             simulation = Simulation(modeller.topology, system, integrator, platform, properties)
             attempts.append({"platform": platform_name, "status": "selected"})
             break
@@ -132,8 +164,18 @@ def main(argv=None):
         "platform": simulation.context.getPlatform().getName(),
         "requestedPlatform": requested_platform,
         "platformAttempts": attempts,
-        "usedCpuFallback": simulation.context.getPlatform().getName() != platform_names[0],
-        "cpuThreads": int(os.environ.get("OPENMM_CPU_THREADS", "1")),
+        # With "auto" there is no requested platform to fall back FROM: CPU is a
+        # legitimate selection, and platformAttempts records what was tried.
+        "usedCpuFallback": (
+            requested_platform != "auto"
+            and simulation.context.getPlatform().getName() != requested_platform
+        ),
+        "cpuThreads": _selected_cpu_threads(simulation, args.cpu_threads),
+        # True only when this run can be reproduced byte for byte.
+        "bitReproducible": (
+            simulation.context.getPlatform().getName() in ("CPU", "Reference")
+            and args.cpu_threads == 1
+        ),
         "platformProperties": properties,
         "maxIterations": args.max_iterations,
         "seed": args.seed,

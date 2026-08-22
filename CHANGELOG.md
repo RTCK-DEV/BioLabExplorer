@@ -4,6 +4,62 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-08-22
+
+Found by actually running the things 1.0.0 only claimed: the OpenMM stack, a
+real local model, and the packaged app.
+
+### Fixed
+
+- **OpenMM relaxation was not reproducible, and its metrics said otherwise.**
+  `openmmCpuThreads` was read from the config, copied into the job record and
+  written into the metrics file — and never applied to the platform. The CPU
+  platform sums forces per thread and reduces them in completion order, so two
+  relaxations of the same structure landed ~200 kJ/mol apart while both reported
+  `cpuThreads: 1`. `openmm_relax.py` now takes `--cpu-threads` (default 1),
+  applies it to the CPU platform before any context is created (including
+  `addHydrogens`), and reports the count the context actually holds.
+  `sim_queue.py` passes the configured value through. A new
+  `bitReproducible` field states plainly whether a run can be reproduced.
+- **`usedCpuFallback` was wrong under `--platform auto`.** With `auto` there is
+  no requested platform to fall back from, so CPU is a selection, not a
+  degradation; it was reported as a fallback on every macOS run.
+- **Terminal escape sequences reached the reports.** `ollama run` word-wraps by
+  moving the cursor back and erasing to end of line, and emits those escapes
+  even into a pipe, so `\u001b[7D\u001b[K` and duplicated words were stored in
+  `advisorySummary` and rendered into Markdown. The client is now invoked with
+  `--nowordwrap`, and `LocalSummaryAdapter.sanitize` renders whatever still
+  arrives the way a terminal would — applying the cursor motions that change
+  content and discarding the rest — so no control byte can reach a report.
+- **The app reported every installed tool as missing.** A GUI app launched from
+  Finder inherits launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the
+  login shell's, so MMseqs2, HMMER and Ollama showed as "missing" in the app
+  while the same probe found all of them from a terminal. `ToolProbe` now also
+  searches the Homebrew and MacPorts prefixes, after `SIM_BIN_DIR` and `PATH`.
+
+### Added
+
+- `Tests/perpetual/test_openmm_determinism.sh`: relaxes the same structure
+  twice and requires byte-identical output, requires the metrics to report the
+  thread count actually used, and pins the `auto` platform ordering. Skips when
+  no Python with OpenMM is available.
+- Swift checks for `LocalSummaryAdapter.sanitize` (cursor-back plus erase-line,
+  colour codes, carriage returns, OSC sequences, stray control bytes) and for
+  the tool search order.
+- CI names the suites that skipped on the runner, so a silent skip is never
+  mistaken for a pass.
+
+### Verified on real tools
+
+- OpenMM 8.5.2: `--platform auto` tried CUDA (not registered) then OpenCL
+  ("No compatible OpenCL platform is available") then selected CPU, with every
+  attempt recorded — which is what `openmmPlatform: "auto"` resolving to `CPU`
+  on macOS was inferred from in 1.0.0 and is now measured.
+- Ollama 0.32.15 with `llama3.2:1b`: a real summary, clean of control bytes,
+  with scores and the validation verdict unchanged.
+- The packaged app: settings, tool readiness with resolved paths, and the
+  live availability message for an absent Pfam database.
+
 ## [1.0.0] — 2026-08-22
 
 First public release. Everything below M1..M5 shipped before the repository was
@@ -114,4 +170,5 @@ Offline FASTA batch consumption from `state/inbox/`, a SQLite seen-set ledger,
 disk and workspace guardrails, a single-instance lock, and a regenerated
 `DISCOVERIES.md`.
 
+[1.0.1]: https://github.com/RTCK-reina/BioLabExplorer/releases/tag/v1.0.1
 [1.0.0]: https://github.com/RTCK-reina/BioLabExplorer/releases/tag/v1.0.0

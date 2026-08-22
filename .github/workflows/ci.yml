@@ -34,7 +34,14 @@ jobs:
       # HMMER lets the Pfam adapter test build a throwaway profile database and
       # exercise the real hmmscan chain. Without it that test skips itself.
       - name: Install HMMER
-        run: brew install hmmer
+        env:
+          HOMEBREW_NO_ENV_HINTS: "1"
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          # The runner image ships an untrusted aws/tap, and Homebrew annotates
+          # every run about it. Nothing here needs that tap.
+          brew untap aws/tap 2>/dev/null || true
+          brew install hmmer
 
       - name: Build (debug)
         run: swift build
@@ -48,10 +55,19 @@ jobs:
       # Everything below runs offline: no test contacts UniProt, AlphaFold,
       # Pfam or any model host.
       - name: Offline test suite (M1..M5 + adapters)
-        run: bash Tests/perpetual/run_all.sh
+        run: |
+          set -o pipefail
+          bash Tests/perpetual/run_all.sh | tee suite.log
 
       - name: Host profile on this runner
         run: python3 scripts/host_profile.py --config config/worker.json --explain
+
+      # Names the optional-tool suites that skipped on this runner, so a silent
+      # skip is never mistaken for a pass. OpenMM is not installed here, so its
+      # determinism suite is expected to skip.
+      - name: Report skipped suites
+        if: always()
+        run: grep -i "SKIPPED" suite.log || echo "no suite skipped"
 
       - name: Package the app bundle
         run: scripts/package_app.sh

@@ -35,9 +35,15 @@ if [ "\$1" = "list" ]; then
   exit 0
 fi
 if [ "\$1" = "run" ]; then
-  echo "\$2" > "${WORK}/model_arg"
+  # The real client word-wraps with cursor-motion escapes even into a pipe,
+  # and prints them alongside the answer. Reproduce that here so the
+  # sanitiser is exercised end to end.
+  for arg in "\$@"; do echo "\$arg" >> "${WORK}/run_args"; done
+  shift
+  while [ "\$1" != "\${1#--}" ]; do shift; done
+  echo "\$1" > "${WORK}/model_arg"
   cat > "${WORK}/prompt"
-  echo "Two weakly annotated candidates were ranked; evidence is thin."
+  printf 'Two weakly annotated candidates were\033[4D\033[K\nwere ranked; \033[32mevidence\033[0m is thin.\n'
   exit 0
 fi
 echo "unexpected ollama invocation: \$*" >&2
@@ -48,6 +54,7 @@ STUB
 
 # --- happy path -------------------------------------------------------------
 make_stub "llama3.2:latest"
+rm -f "${WORK}/run_args"
 RUN="${WORK}/run"
 PATH="${BIN}:${PATH}" "${PIPELINE}" --input "${WORK}/query.fasta" --output "${RUN}" --max 2 \
   --summarize llama3.2 > "${WORK}/pipeline.log" 2>&1 \
@@ -64,9 +71,20 @@ echo "local summary: the prompt reaches the model on stdin"
 
 grep -q "Advisory Summary (not evidence)" "${RUN}/discovery-report.md" || {
   echo "FAIL: the report does not label the summary as advisory" >&2; exit 1; }
-grep -q "Two weakly annotated candidates were ranked" "${RUN}/discovery-report.md" || {
+grep -q "Two weakly annotated candidates" "${RUN}/discovery-report.md" || {
   echo "FAIL: the summary text is missing from the report" >&2; exit 1; }
+if LC_ALL=C grep -q $'\033' "${RUN}/discovery-report.md"; then
+  echo "FAIL: terminal escape bytes reached the report" >&2; exit 1
+fi
+grep -q "were ranked; evidence is thin." "${RUN}/discovery-report.md" || {
+  echo "FAIL: cursor motions were not applied when rendering the model output" >&2
+  grep -n "weakly" "${RUN}/discovery-report.md"; exit 1; }
 echo "local summary: the report renders it behind an explicit disclaimer"
+echo "local summary: terminal control sequences are rendered away, not stored"
+
+grep -q -- "--nowordwrap" "${WORK}/run_args" || {
+  echo "FAIL: the client is not asked to stop word-wrapping" >&2; cat "${WORK}/run_args"; exit 1; }
+echo "local summary: the client is invoked with --nowordwrap"
 
 python3 - "${RUN}" <<'PY'
 import glob, json, os, sys
@@ -133,10 +151,25 @@ grep -q "Local summary unavailable" "${BROKEN}/discovery-report.md" || {
   echo "FAIL: a failing daemon must be reported" >&2; exit 1; }
 echo "local summary: a failing daemon degrades to a visible note"
 
+# --- a different tag of the same model is NOT the model ----------------------
+# ollama resolves a bare name to :latest, so having llama3.2:1b installed does
+# not mean `ollama run llama3.2` will answer — it would start a download.
+make_stub "llama3.2:1b"
+WRONG_TAG="${WORK}/wrong_tag"
+PATH="${BIN}:${PATH}" "${PIPELINE}" --input "${WORK}/query.fasta" --output "${WRONG_TAG}" --max 2 \
+  --summarize llama3.2 > /dev/null 2>&1 \
+  || { echo "FAIL: a differently tagged model must not fail the run" >&2; exit 1; }
+grep -q "Model llama3.2 is not installed" "${WRONG_TAG}/discovery-report.md" || {
+  echo "FAIL: llama3.2:1b must not satisfy a request for llama3.2" >&2
+  grep -n "summary" "${WRONG_TAG}/discovery-report.md"; exit 1; }
+echo "local summary: a different tag does not count as the requested model"
+
 # --- ollama absent entirely -------------------------------------------------
+# BIOLAB_TOOL_SEARCH_PATHS empties the package-manager prefixes the probe would
+# otherwise search, so this case holds on a machine that really has ollama.
 rm -f "${BIN}/ollama"
 ABSENT="${WORK}/absent"
-PATH="${BIN}:/usr/bin:/bin" "${PIPELINE}" --input "${WORK}/query.fasta" --output "${ABSENT}" --max 2 \
+BIOLAB_TOOL_SEARCH_PATHS="" PATH="${BIN}:/usr/bin:/bin" "${PIPELINE}" --input "${WORK}/query.fasta" --output "${ABSENT}" --max 2 \
   --summarize > /dev/null 2>&1 \
   || { echo "FAIL: a missing ollama must not fail the run" >&2; exit 1; }
 grep -q "Local summary unavailable" "${ABSENT}/discovery-report.md" || {

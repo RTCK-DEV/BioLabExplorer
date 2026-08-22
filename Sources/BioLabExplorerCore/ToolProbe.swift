@@ -1,12 +1,47 @@
 import Foundation
 
 public struct ToolProbe: Sendable {
+    /// Where package managers put binaries, searched after PATH.
+    ///
+    /// A GUI app launched from Finder inherits launchd's PATH
+    /// (`/usr/bin:/bin:/usr/sbin:/sbin`), not the login shell's, so every
+    /// Homebrew, MacPorts and Conda tool looked missing inside the app while
+    /// the same probe found all of them from a terminal. Reporting an installed
+    /// tool as missing is exactly the silent-wrong-answer this project refuses
+    /// to ship, so the well-known prefixes are searched explicitly.
+    public static let defaultFallbackDirectories = [
+        "/opt/homebrew/bin",   // Homebrew, Apple Silicon
+        "/usr/local/bin",      // Homebrew, Intel
+        "/opt/local/bin",      // MacPorts
+        "/opt/homebrew/sbin",
+        "/usr/local/sbin"
+    ]
+
     private let tools: [ToolDefinition]
     private let environment: [String: String]
+    private let fallbackDirectories: [String]
 
-    public init(tools: [ToolDefinition], environment: [String: String] = ProcessInfo.processInfo.environment) {
+    /// Overrides the prefixes above, colon separated. Set it empty to search
+    /// nothing beyond PATH — which is how a test asks for a host where a tool
+    /// is genuinely absent, even on a machine that has it installed.
+    public static let searchPathsEnvironmentKey = "BIOLAB_TOOL_SEARCH_PATHS"
+
+    public init(
+        tools: [ToolDefinition],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fallbackDirectories: [String]? = nil
+    ) {
         self.tools = tools
         self.environment = environment
+        if let fallbackDirectories {
+            self.fallbackDirectories = fallbackDirectories
+        } else if let override = environment[ToolProbe.searchPathsEnvironmentKey] {
+            self.fallbackDirectories = override
+                .split(separator: ":", omittingEmptySubsequences: true)
+                .map(String.init)
+        } else {
+            self.fallbackDirectories = ToolProbe.defaultFallbackDirectories
+        }
     }
 
     public static func defaultProbe() -> ToolProbe {
@@ -66,14 +101,41 @@ public struct ToolProbe: Sendable {
             }
         }
 
-        let searchPath = environment["PATH", default: "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"]
-        for directory in searchPath.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(directory)).appendingPathComponent(name).path
+        for directory in searchDirectories() {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent(name).path
             if FileManager.default.isExecutableFile(atPath: candidate) {
                 return candidate
             }
         }
         return nil
+    }
+
+    /// Directories to search, in order, without duplicates.
+    ///
+    /// `SIM_BIN_DIR` is the project's documented seam for a separate scientific
+    /// environment, so it wins. PATH comes next, so an explicit entry always
+    /// beats a guess. The package-manager prefixes are last.
+    private func searchDirectories() -> [String] {
+        var directories: [String] = []
+        var seen: Set<String> = []
+
+        func append(_ directory: String) {
+            let trimmed = directory.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { return }
+            directories.append(trimmed)
+        }
+
+        if let simBinDirectory = environment["SIM_BIN_DIR"], !simBinDirectory.isEmpty {
+            append(simBinDirectory)
+        }
+        let searchPath = environment["PATH", default: "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"]
+        for directory in searchPath.split(separator: ":") {
+            append(String(directory))
+        }
+        for directory in fallbackDirectories {
+            append(directory)
+        }
+        return directories
     }
 
     private func localCandidates(for name: String) -> [String] {

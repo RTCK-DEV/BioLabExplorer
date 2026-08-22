@@ -33,6 +33,8 @@ discoveries/assets/*
 !discoveries/assets/3Dmol-min.js
 !discoveries/assets/3Dmol-LICENSE.txt
 logs/*.log
+# CI (and anyone copying its command) tees the suite output here.
+suite.log
 # All new run products are local-only. Already-tracked historical examples stay
 # tracked by Git, while future audit/custom run IDs cannot be added accidentally.
 runs/*/

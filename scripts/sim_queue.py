@@ -253,7 +253,8 @@ def _command(job, detected, run_dir, cfg, reference, cpu_threads):
                 "--metrics", metrics, "--platform", str(cfg.get("openmmPlatform", "CPU")),
                 "--precision", str(cfg.get("openmmPrecision", "mixed")),
                 "--max-iterations", str(int(cfg.get("openmmMaxIterations", 1000))),
-                "--seed", str(int(cfg.get("openmmSeed", 20260715)))]
+                "--seed", str(int(cfg.get("openmmSeed", 20260715))),
+                "--cpu-threads", str(max(1, int(cfg.get("openmmCpuThreads", 1))))]
         if cfg.get("openmmAllowCpuFallback", True):
             command.append("--allow-cpu-fallback")
         return command, output

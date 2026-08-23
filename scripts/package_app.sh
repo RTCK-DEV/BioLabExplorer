@@ -12,8 +12,13 @@ cd "${ROOT_DIR}"
 # APP_ARCHS lets a release build produce a universal bundle:
 #   APP_ARCHS="--arch arm64 --arch x86_64" scripts/package_app.sh
 # Empty (the default) builds for this machine only.
-read -r -a APP_ARCH_FLAGS <<< "${APP_ARCHS:-}"
-swift build -c release --product BioLabExplorer "${APP_ARCH_FLAGS[@]}"
+APP_ARCH_FLAGS=()
+if [[ -n "${APP_ARCHS:-}" ]]; then
+  read -r -a APP_ARCH_FLAGS <<< "${APP_ARCHS}"
+fi
+# macOS ships bash 3.2, where "${array[@]}" on an EMPTY array trips `set -u`.
+# The ${x[@]+...} guard expands to nothing at all when the array is empty.
+swift build -c release --product BioLabExplorer ${APP_ARCH_FLAGS[@]+"${APP_ARCH_FLAGS[@]}"}
 
 # A multi-architecture build lands outside .build/release.
 BUILT=""

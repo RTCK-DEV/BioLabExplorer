@@ -30,20 +30,36 @@ heading() { printf '\n%s%s%s\n' "${BOLD}" "$1" "${OFF}"; }
 printf '%sBioLabExplorer — machine check%s\n' "${BOLD}" "${OFF}"
 printf '%s%s%s\n' "${DIM}" "$(sw_vers -productName 2>/dev/null || uname -s) $(sw_vers -productVersion 2>/dev/null || uname -r) on $(uname -m)" "${OFF}"
 
+# A non-macOS user should get the answer in one screen, not after reading a
+# checklist of things that cannot help them.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  printf '\n%sThis project does not run on %s.%s\n\n' "${RED}" "$(uname -s)" "${OFF}"
+  cat <<'WHY'
+  BioLabExplorer is macOS 15 or later, and not by accident:
+
+    - the app is SwiftUI, which exists only on Apple platforms
+    - the scoring engine is Swift, built against the macOS SDK
+    - the optional structure chain targets Apple Silicon (Metal / MPS)
+
+  There is no Linux or Windows build, and porting it would mean replacing the
+  interface layer entirely. Nothing you install will change this check.
+
+  If you only want the ranking algorithm, the scoring lives in
+  Sources/BioLabExplorerCore/ and depends on Foundation alone — readable, and
+  portable in principle, but not built or tested anywhere but macOS.
+WHY
+  exit 1
+fi
+
 # ---------------------------------------------------------------- required --
 heading "Required"
 
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  bad "macOS is required (this is $(uname -s))"
-  hint "The app and the scoring engine are macOS-only."
+major="$(sw_vers -productVersion | cut -d. -f1)"
+if [[ "${major}" -ge 15 ]]; then
+  ok "macOS ${major} (15 or later needed)"
 else
-  major="$(sw_vers -productVersion | cut -d. -f1)"
-  if [[ "${major}" -ge 15 ]]; then
-    ok "macOS ${major} (15 or later needed)"
-  else
-    bad "macOS ${major}; 15 or later is needed"
-    hint "Update macOS, or use an older release of this project."
-  fi
+  bad "macOS ${major}; 15 or later is needed"
+  hint "Update macOS, or use an older release of this project."
 fi
 
 if command -v swift > /dev/null 2>&1; then

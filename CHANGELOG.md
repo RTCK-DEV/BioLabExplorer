@@ -39,6 +39,13 @@ real local model, and the packaged app.
 
 ### Added
 
+- **Build provenance on every release artifact.** Notarizing needs a paid Apple
+  certificate this project does not have, so the downloads stay ad-hoc signed
+  and Gatekeeper still stops them. What the release workflow can give a reader
+  for free is the part that actually matters — signed, public evidence that
+  these exact bytes came out of this repository at a named commit:
+  `gh attestation verify <file> --repo RTCK-reina/BioLabExplorer`. Documented in
+  the README and inside the tarball.
 - **`scripts/doctor.sh`** — the one command a newcomer runs. Checks macOS,
   Swift, Python, the bundled data and every optional tool, prints the exact
   command for anything missing, shows what this machine resolves the config to,
@@ -65,6 +72,11 @@ real local model, and the packaged app.
   mistaken for a pass.
 
 ### Changed
+
+- `scripts/doctor.sh` answers a non-macOS user in one screen — why this is
+  macOS-only, that no install will change it, and where the portable part of
+  the code lives — instead of walking them through a checklist of things that
+  cannot help.
 
 - **One source of truth for the OpenMM platform.** `host_profile.py` used to
   guess `openmmPlatform` from the host while `openmm_relax.py` probed the

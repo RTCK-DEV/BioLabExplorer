@@ -11,6 +11,12 @@ on:
 
 permissions:
   contents: write
+  # Build provenance: signed, public evidence that these exact bytes came out
+  # of this workflow, from this commit. It is not Apple notarization — nothing
+  # here makes Gatekeeper happy — but it is the part notarization would have
+  # given a reader that can be had without a paid certificate.
+  id-token: write
+  attestations: write
 
 jobs:
   artifacts:
@@ -49,6 +55,13 @@ jobs:
           mkdir -p /tmp/smoke
           tar -xzf dist/release/*.tar.gz -C /tmp/smoke
           "$(find /tmp/smoke -name BioLabExplorerPipeline -type f | head -1)" --version
+
+      - name: Attest what was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/release/*.tar.gz
+            dist/release/*.zip
 
       - uses: actions/upload-artifact@v4
         with:

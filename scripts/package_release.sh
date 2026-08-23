@@ -56,14 +56,24 @@ cp LICENSE THIRD_PARTY_NOTICES.md "${STAGE}/${PKG}/"
 cat > "${STAGE}/${PKG}/READ-ME-FIRST.txt" <<TXT
 BioLabExplorer ${VERSION} — command line tools (${ARCH_LABEL})
 
-These binaries are signed ad-hoc and are NOT notarized, because this project
-has no Apple Developer certificate. macOS quarantines anything downloaded from
-the internet, so the first run will be refused until you clear that flag:
+These binaries are signed ad-hoc and are NOT notarized: notarizing requires a
+paid Apple Developer certificate this project does not have. macOS quarantines
+anything downloaded from the internet, so the first run will be refused until
+you clear that flag.
+
+Before you do, verify where these bytes came from. Every release is built by a
+GitHub Actions workflow that signs a provenance attestation naming the exact
+commit:
+
+    gh attestation verify <the file you downloaded> --repo RTCK-reina/BioLabExplorer
+    shasum -a 256 -c SHA256SUMS
+
+Only then:
 
     xattr -dr com.apple.quarantine "\$(pwd)"
 
-Do that only after checking the SHA256SUMS file against the release page.
-If you would rather not, build from source instead — it takes about a minute:
+If you would rather not make that trade, build from source instead — it takes
+about a minute and skips the question entirely:
 
     git clone https://github.com/RTCK-reina/BioLabExplorer.git
     cd BioLabExplorer

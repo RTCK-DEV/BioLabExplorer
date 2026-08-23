@@ -19,6 +19,10 @@ No cloud LLM is contacted on any code path.
 candidates in the middle, evidence for the selected candidate on the
 right.](docs/images/app-layout.svg)
 
+<sub>A diagram of the window, not a screen capture — drawn from a real run, and
+kept here because it stays legible at any size and does not go stale on a theme
+change. Run `swift run BioLabExplorer` to see the real thing.</sub>
+
 ## Start here
 
 ```sh
@@ -56,19 +60,34 @@ If you would rather not install Swift, every release carries a universal
 | `BioLabExplorer-<version>-macos-universal-app.zip` | the app |
 | `SHA256SUMS` | digests for both — check them |
 
-These are signed ad-hoc and **not notarized**, because this project has no
-Apple Developer certificate. macOS quarantines downloads, so the first launch
-is refused until you clear that flag. For the app, right-click it and choose
-Open, which offers an "Open anyway" button. For the tools:
+These are signed ad-hoc and **not notarized**: notarizing requires a paid Apple
+Developer certificate this project does not have. macOS quarantines downloads,
+so the first launch is refused until you clear that flag.
+
+What you can check instead — and it answers the question notarization is really
+being asked, *did these bytes come from this source* — is the build provenance
+GitHub signs for every release:
 
 ```sh
-shasum -a 256 -c SHA256SUMS          # check first
-xattr -dr com.apple.quarantine bin   # then allow them to run
+gh attestation verify BioLabExplorer-1.0.1-macos-universal.tar.gz \
+  --repo RTCK-reina/BioLabExplorer
+```
+
+That names the workflow and the commit the file was built from. It is public,
+signed, and not something the author can forge after the fact. Then:
+
+```sh
+shasum -a 256 -c SHA256SUMS          # the digests match the release page
+xattr -dr com.apple.quarantine bin   # allow them to run
 bin/BioLabExplorerPipeline --version
 ```
 
+For the app, right-click it and choose Open, which offers an "Open anyway"
+button.
+
 If that trade does not appeal, build from source above — it takes about a
-minute and needs nothing but Apple's command line tools.
+minute, needs nothing but Apple's command line tools, and skips the question
+entirely.
 
 Stuck? Jump to [Troubleshooting](#troubleshooting).
 

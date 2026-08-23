@@ -73,8 +73,18 @@ gh attestation verify BioLabExplorer-1.0.1-macos-universal.tar.gz \
   --repo RTCK-reina/BioLabExplorer
 ```
 
-That names the workflow and the commit the file was built from. It is public,
-signed, and not something the author can forge after the fact. Then:
+**It prints nothing when it succeeds** — an exit status of 0 is the answer, and
+a failure is loud. To actually see what was verified:
+
+```sh
+gh attestation verify BioLabExplorer-1.0.1-macos-universal.tar.gz \
+  --repo RTCK-reina/BioLabExplorer --format json |
+  python3 -c 'import json,sys; c=json.load(sys.stdin)[0]["verificationResult"]["signature"]["certificate"]; print(c["sourceRepositoryURI"], c["sourceRepositoryDigest"], c["buildSignerURI"], sep="\n")'
+```
+
+That prints the repository, the commit and the workflow the file was built
+from. It is public, signed, and not something the author can forge after the
+fact. Then:
 
 ```sh
 shasum -a 256 -c SHA256SUMS          # the digests match the release page

@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach artifacts to
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  artifacts:
+    name: Build and attach the downloads
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Report toolchain
+        run: swift --version
+
+      # A release must not ship something the test suite has not seen.
+      - name: Swift checks
+        run: swift run BioLabExplorerChecks
+
+      - name: Build the downloads
+        run: scripts/package_release.sh
+
+      - name: The version must match the tag
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="$(sed -n 's/.*static let current = "\(.*\)".*/\1/p' Sources/BioLabExplorerCore/Version.swift)"
+          if [ "${tag}" != "v${version}" ]; then
+            echo "tag ${tag} does not match BioLabExplorerVersion ${version}" >&2
+            exit 1
+          fi
+          echo "tag ${tag} matches version ${version}"
+
+      # Proves the artifact actually starts, on the runner, before anyone
+      # downloads it.
+      - name: Smoke-test the packaged binary
+        run: |
+          mkdir -p /tmp/smoke
+          tar -xzf dist/release/*.tar.gz -C /tmp/smoke
+          "$(find /tmp/smoke -name BioLabExplorerPipeline -type f | head -1)" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-downloads
+          path: dist/release/*
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release upload "${tag}" dist/release/* --clobber --repo "${{ github.repository }}"

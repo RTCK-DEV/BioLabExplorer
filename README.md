@@ -44,6 +44,32 @@ Run `scripts/doctor.sh` on its own any time to see what is installed, what is
 missing, and what each missing piece would enable. Nothing in that list is
 required: the default path uses no external tool at all.
 
+### Or download it built
+
+If you would rather not install Swift, every release carries a universal
+(Apple Silicon and Intel) build on the
+[releases page](https://github.com/RTCK-reina/BioLabExplorer/releases):
+
+| File | What it is |
+| --- | --- |
+| `BioLabExplorer-<version>-macos-universal.tar.gz` | the command line tools |
+| `BioLabExplorer-<version>-macos-universal-app.zip` | the app |
+| `SHA256SUMS` | digests for both — check them |
+
+These are signed ad-hoc and **not notarized**, because this project has no
+Apple Developer certificate. macOS quarantines downloads, so the first launch
+is refused until you clear that flag. For the app, right-click it and choose
+Open, which offers an "Open anyway" button. For the tools:
+
+```sh
+shasum -a 256 -c SHA256SUMS          # check first
+xattr -dr com.apple.quarantine bin   # then allow them to run
+bin/BioLabExplorerPipeline --version
+```
+
+If that trade does not appeal, build from source above — it takes about a
+minute and needs nothing but Apple's command line tools.
+
 Stuck? Jump to [Troubleshooting](#troubleshooting).
 
 ## Is this for you?

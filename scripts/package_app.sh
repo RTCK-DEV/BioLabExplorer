@@ -9,10 +9,23 @@ MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
 cd "${ROOT_DIR}"
-swift build -c release --product BioLabExplorer
+# APP_ARCHS lets a release build produce a universal bundle:
+#   APP_ARCHS="--arch arm64 --arch x86_64" scripts/package_app.sh
+# Empty (the default) builds for this machine only.
+read -r -a APP_ARCH_FLAGS <<< "${APP_ARCHS:-}"
+swift build -c release --product BioLabExplorer "${APP_ARCH_FLAGS[@]}"
+
+# A multi-architecture build lands outside .build/release.
+BUILT=""
+for candidate in "${ROOT_DIR}/.build/out/Products/Release/BioLabExplorer" \
+                 "${ROOT_DIR}/.build/apple/Products/Release/BioLabExplorer" \
+                 "${ROOT_DIR}/.build/release/BioLabExplorer"; do
+  if [[ -x "${candidate}" ]]; then BUILT="${candidate}"; break; fi
+done
+[[ -n "${BUILT}" ]] || { echo "package_app: cannot find the built executable" >&2; exit 1; }
 
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
-cp "${ROOT_DIR}/.build/release/BioLabExplorer" "${MACOS_DIR}/BioLabExplorer"
+cp "${BUILT}" "${MACOS_DIR}/BioLabExplorer"
 chmod +x "${MACOS_DIR}/BioLabExplorer"
 
 cat > "${CONTENTS_DIR}/Info.plist" <<'PLIST'

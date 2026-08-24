@@ -99,6 +99,46 @@ real local model, and the packaged app.
 - The packaged app: settings, tool readiness with resolved paths, and the
   live availability message for an absent Pfam database.
 
+### Known limitations
+
+Things this release does not do. None of them is a bug report; they are the
+answers a reader would otherwise find the hard way.
+
+- **The downloads are ad-hoc signed, not notarized.** Notarization needs a paid
+  Apple Developer account this project does not have, so Gatekeeper stops both
+  the app and the CLI the first time they are opened. Check the build
+  provenance first — `gh attestation verify <file> --repo
+  RTCK-reina/BioLabExplorer`, which prints nothing and exits 0 when it
+  succeeds — then follow the Gatekeeper steps under Troubleshooting in the
+  README.
+- **macOS 15 or newer, Apple Silicon or Intel.** The Swift core is portable and
+  its tests run anywhere Swift 6 does, but the app, the packaging scripts and
+  the tool probe are macOS-only. On other systems `scripts/doctor.sh` says so
+  in one screen instead of walking through a checklist that cannot help.
+- **The figure in the README is a diagram, not a screen capture.** It is drawn
+  to match the window layout and labelled as a diagram. A `--render-screenshot`
+  flag was written and then removed: `ImageRenderer` cannot draw
+  `NavigationSplitView` or `List`, so it wrote unusable images rather than a
+  picture of the app.
+- **The simulation stack is an opt-in multi-gigabyte install.** OpenMM, ESMFold
+  and AutoDock Vina are neither bundled nor installed by anything in this
+  repository. Until they are present `Tests/perpetual/test_openmm_determinism.sh`
+  reports SKIPPED and the pipeline runs the sequence-only path.
+- **`bitReproducible` is a single-threaded CPU guarantee.** It is true only on
+  the CPU or Reference platform with one thread. Anywhere else the order in
+  which forces are reduced varies between runs, and two relaxations of the same
+  structure will not match.
+- **The Pfam and advisory-summary adapters need tools you install yourself.**
+  Domain annotation wants an `hmmpress`-indexed Pfam-A database; the advisory
+  summary wants a running `ollama` server and a model you have pulled. Neither
+  is bundled, both report their own unavailability with the next command to
+  run, and a run completes without either.
+- **ColabFold and the External MSA Store are reserved keys, not features.**
+  `enableColabFold` and `externalMsaStorePath` appear in `config/worker.json`,
+  but nothing in this release acts on them: a fully local MSA needs roughly
+  940 GB of database and 128 GB of RAM, and sending raw FASTA to a public MSA
+  server is out of scope for a tool that runs on one machine.
+
 ## [1.0.0] — 2026-08-22
 
 First public release. Everything below M1..M5 shipped before the repository was

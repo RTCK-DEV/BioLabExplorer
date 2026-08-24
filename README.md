@@ -112,6 +112,13 @@ Stuck? Jump to [Troubleshooting](#troubleshooting).
 | Run it on Windows or Linux | **No.** macOS 15+ only. |
 | Use it without MMseqs2, HMMER, OpenMM or a local LLM | **Yes.** Each one is optional and reported when absent. |
 
+The rest of what this release will not do — Gatekeeper stopping an
+unnotarized download, the simulation stack being an opt-in multi-gigabyte
+install, `bitReproducible` holding only on one CPU thread, the ColabFold keys
+being reserved rather than a feature — is listed under
+[Known limitations](CHANGELOG.md#known-limitations) in the changelog, and on
+the [release page](https://github.com/RTCK-reina/BioLabExplorer/releases/latest).
+
 ## What this is, and what it is not
 
 **It is** a prioritisation aid. It answers "of these ten thousand

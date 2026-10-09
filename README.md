@@ -1,6 +1,6 @@
 # BioLabExplorer
 
-[![CI](https://github.com/RTCK-reina/BioLabExplorer/actions/workflows/ci.yml/badge.svg)](https://github.com/RTCK-reina/BioLabExplorer/actions/workflows/ci.yml)
+[![CI](https://github.com/RTCK-DEV/BioLabExplorer/actions/workflows/ci.yml/badge.svg)](https://github.com/RTCK-DEV/BioLabExplorer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: macOS 15+](https://img.shields.io/badge/platform-macOS%2015%2B-lightgrey)
 ![Swift 6](https://img.shields.io/badge/swift-6-orange)
@@ -26,7 +26,7 @@ change. Run `swift run BioLabExplorer` to see the real thing.</sub>
 ## Start here
 
 ```sh
-git clone https://github.com/RTCK-reina/BioLabExplorer.git
+git clone https://github.com/RTCK-DEV/BioLabExplorer.git
 cd BioLabExplorer
 scripts/doctor.sh --build
 ```
@@ -52,7 +52,7 @@ required: the default path uses no external tool at all.
 
 If you would rather not install Swift, every release carries a universal
 (Apple Silicon and Intel) build on the
-[releases page](https://github.com/RTCK-reina/BioLabExplorer/releases):
+[releases page](https://github.com/RTCK-DEV/BioLabExplorer/releases):
 
 | File | What it is |
 | --- | --- |
@@ -70,7 +70,7 @@ GitHub signs for every release:
 
 ```sh
 gh attestation verify BioLabExplorer-1.0.1-macos-universal.tar.gz \
-  --repo RTCK-reina/BioLabExplorer
+  --repo RTCK-DEV/BioLabExplorer
 ```
 
 **It prints nothing when it succeeds** — an exit status of 0 is the answer, and
@@ -78,7 +78,7 @@ a failure is loud. To actually see what was verified:
 
 ```sh
 gh attestation verify BioLabExplorer-1.0.1-macos-universal.tar.gz \
-  --repo RTCK-reina/BioLabExplorer --format json |
+  --repo RTCK-DEV/BioLabExplorer --format json |
   python3 -c 'import json,sys; c=json.load(sys.stdin)[0]["verificationResult"]["signature"]["certificate"]; print(c["sourceRepositoryURI"], c["sourceRepositoryDigest"], c["buildSignerURI"], sep="\n")'
 ```
 
@@ -117,7 +117,7 @@ unnotarized download, the simulation stack being an opt-in multi-gigabyte
 install, `bitReproducible` holding only on one CPU thread, the ColabFold keys
 being reserved rather than a feature — is listed under
 [Known limitations](CHANGELOG.md#known-limitations) in the changelog, and on
-the [release page](https://github.com/RTCK-reina/BioLabExplorer/releases/latest).
+the [release page](https://github.com/RTCK-DEV/BioLabExplorer/releases/latest).
 
 ## What this is, and what it is not
 

@@ -65,7 +65,7 @@ Before you do, verify where these bytes came from. Every release is built by a
 GitHub Actions workflow that signs a provenance attestation naming the exact
 commit:
 
-    gh attestation verify <the file you downloaded> --repo RTCK-reina/BioLabExplorer
+    gh attestation verify <the file you downloaded> --repo RTCK-DEV/BioLabExplorer
     shasum -a 256 -c SHA256SUMS
 
 Only then:
@@ -75,7 +75,7 @@ Only then:
 If you would rather not make that trade, build from source instead — it takes
 about a minute and skips the question entirely:
 
-    git clone https://github.com/RTCK-reina/BioLabExplorer.git
+    git clone https://github.com/RTCK-DEV/BioLabExplorer.git
     cd BioLabExplorer
     scripts/doctor.sh --build
 

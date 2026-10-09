@@ -44,7 +44,7 @@ real local model, and the packaged app.
   and Gatekeeper still stops them. What the release workflow can give a reader
   for free is the part that actually matters — signed, public evidence that
   these exact bytes came out of this repository at a named commit:
-  `gh attestation verify <file> --repo RTCK-reina/BioLabExplorer`. Documented in
+  `gh attestation verify <file> --repo RTCK-DEV/BioLabExplorer`. Documented in
   the README and inside the tarball.
 - **`scripts/doctor.sh`** — the one command a newcomer runs. Checks macOS,
   Swift, Python, the bundled data and every optional tool, prints the exact
@@ -108,7 +108,7 @@ answers a reader would otherwise find the hard way.
   Apple Developer account this project does not have, so Gatekeeper stops both
   the app and the CLI the first time they are opened. Check the build
   provenance first — `gh attestation verify <file> --repo
-  RTCK-reina/BioLabExplorer`, which prints nothing and exits 0 when it
+  RTCK-DEV/BioLabExplorer`, which prints nothing and exits 0 when it
   succeeds — then follow the Gatekeeper steps under Troubleshooting in the
   README.
 - **macOS 15 or newer, Apple Silicon or Intel.** The Swift core is portable and
@@ -249,5 +249,5 @@ Offline FASTA batch consumption from `state/inbox/`, a SQLite seen-set ledger,
 disk and workspace guardrails, a single-instance lock, and a regenerated
 `DISCOVERIES.md`.
 
-[1.0.1]: https://github.com/RTCK-reina/BioLabExplorer/releases/tag/v1.0.1
-[1.0.0]: https://github.com/RTCK-reina/BioLabExplorer/releases/tag/v1.0.0
+[1.0.1]: https://github.com/RTCK-DEV/BioLabExplorer/releases/tag/v1.0.1
+[1.0.0]: https://github.com/RTCK-DEV/BioLabExplorer/releases/tag/v1.0.0
